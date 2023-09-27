@@ -82,10 +82,25 @@ impl Default for Skills {
     }
 }
 
+#[derive(PartialEq)]
+enum Networks {
+    Internet,
+    SIPRnet,
+}
+
+#[derive(PartialEq)]
+enum Tasks {
+    SearchTasks,
+    Datamine,       // collect data from net
+    SocialPractice, // level up social skill?
+}
+
 struct MyApp {
     player: Player,
     name: String,
     terminal_lines: Vec<String>,
+    current_net: Networks,
+    current_task: Tasks,
 }
 
 impl Default for MyApp {
@@ -97,6 +112,8 @@ impl Default for MyApp {
                 "welcome to cybergame".to_string(),
                 "strap in, choomba".to_string(),
             ],
+            current_net: Networks::Internet,
+            current_task: Tasks::Datamine,
         }
     }
 }
@@ -158,6 +175,40 @@ impl eframe::App for MyApp {
                 self.terminal_print("thanks bud");
                 // self.terminal_lines.push("thanks bud".to_string())
             }
+            // list available networks
+            ui.horizontal(|ui| {
+                ui.label("Network: ");
+                ui.radio_value(&mut self.current_net, Networks::Internet, "Internet");
+                ui.radio_value(&mut self.current_net, Networks::SIPRnet, "SIPRnet");
+            });
+            // list available tasks
+            ui.horizontal(|ui| {
+                ui.label("Task: ");
+                match self.current_net {
+                    Networks::Internet => {
+                        ui.radio_value(
+                            &mut self.current_task,
+                            Tasks::SearchTasks,
+                            "Search for ..?",
+                        );
+                        ui.radio_value(&mut self.current_task, Tasks::SocialPractice, "Socialize");
+                    }
+                    Networks::SIPRnet => {
+                        ui.radio_value(
+                            &mut self.current_task,
+                            Tasks::SearchTasks,
+                            "Search for ..?",
+                        );
+                        ui.radio_value(&mut self.current_task, Tasks::Datamine, "Datamine");
+                    }
+                }
+            });
+            match self.current_net {
+                Networks::Internet => ui.label("You are browsing the public internet."),
+                Networks::SIPRnet => {
+                    ui.label("You are logged in to the US DoD's classified network.")
+                }
+            };
             ui.separator();
             display_terminal(ui, &self.terminal_lines);
         });
