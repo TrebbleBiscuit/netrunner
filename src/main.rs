@@ -2,7 +2,9 @@
 
 use eframe::egui;
 use rand::seq::SliceRandom;
-use rand::thread_rng;
+use rand::{thread_rng, Rng};
+
+mod utils;
 
 fn main() -> Result<(), eframe::Error> {
     // env_logger::init(); // Log to stderr (if you run with `RUST_LOG=debug`).
@@ -36,6 +38,29 @@ trait HasHealth {
             self.set_hp(0);
         } else {
             self.set_hp(self.get_hp() - amount)
+        }
+    }
+}
+
+trait HasRam {
+    fn get_ram(&self) -> i32;
+    fn max_ram(&self) -> i32;
+    fn set_ram(&mut self, amount: i32);
+
+    fn ram_up(&mut self, amount: i32) {
+        let recoverable_ram = self.max_ram() - self.get_ram();
+        if recoverable_ram == 0 {
+            return;
+        }
+        self.set_ram(self.max_ram().min(self.get_ram() + amount))
+    }
+
+    fn ram_down(&mut self, amount: i32) {
+        if amount > self.get_ram() {
+            // DEATH
+            self.set_ram(0);
+        } else {
+            self.set_ram(self.get_ram() - amount)
         }
     }
 }
@@ -78,6 +103,18 @@ impl HasHealth for Player {
     }
     fn set_hp(&mut self, amount: i32) {
         self.hp = amount.min(self.max_hp())
+    }
+}
+
+impl HasRam for Player {
+    fn get_ram(&self) -> i32 {
+        return self.ram;
+    }
+    fn max_ram(&self) -> i32 {
+        return 100;
+    }
+    fn set_ram(&mut self, amount: i32) {
+        self.ram = amount.min(self.max_ram())
     }
 }
 
@@ -135,6 +172,7 @@ struct NetrunnerGame {
     terminal_lines: Vec<String>,
     current_net: Networks,
     current_task: Tasks,
+    turn: i32,
 }
 
 impl Default for NetrunnerGame {
@@ -147,11 +185,67 @@ impl Default for NetrunnerGame {
             ],
             current_net: Networks::Internet,
             current_task: Tasks::Datamine,
+            turn: 1,
         }
     }
 }
 
 impl NetrunnerGame {
+    fn do_task(&mut self) {
+        let difficulty = match self.current_net {
+            Networks::Internet => 1.0,
+            Networks::SIPRnet => 3.0,
+        };
+
+        match self.current_task {
+            Tasks::Search => {
+                self.do_task_search(difficulty);
+            }
+            Tasks::Datamine => self.terminal_print("Nah, you don't want to do that."),
+            Tasks::Social => self.terminal_print("Nah, you don't want to do that."),
+        }
+    }
+
+    fn do_task_search(&mut self, difficulty: f32) {
+        let mut rng = thread_rng();
+        let net_name = match self.current_net {
+            Networks::Internet => "the internet",
+            Networks::SIPRnet => "SIPRnet",
+        };
+        self.terminal_print(
+            format!(
+                "You search {} for any interesting information you can find.",
+                { net_name }
+            )
+            .as_str(),
+        );
+        //
+        let roll_success: f32 = rng.gen();
+        let success_chance = 0.8;
+        if utils::roll_encounter(1.0 - success_chance) {
+            // minor good thing - search success
+            let reward_amount: i32 = (roll_success * difficulty * 3.0).ceil() as i32;
+            self.player.ram_up(reward_amount);
+            self.terminal_print(
+                format!("You found some interesting data. You gained {} RAM", {
+                    reward_amount
+                })
+                .as_str(),
+            );
+        } else {
+            // bad thing - encounter
+            let damage_amount = (roll_success * difficulty * 2.0).floor() as i32;
+            self.player.hp_down(damage_amount);
+            self.terminal_print(
+                format!(
+                    "You run into a nasty piece of malware that does {} damage.",
+                    { damage_amount }
+                )
+                .as_str(),
+            );
+        }
+    }
+
     fn terminal_print(&mut self, line: &str) {
         self.terminal_lines.push(line.to_string())
     }
@@ -280,7 +374,7 @@ fn colored_label(label_txt: &str, current_val: i32, max_val: i32) -> egui::RichT
 impl eframe::App for NetrunnerGame {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.heading("wake up cyberman");
+            ui.heading("welcome to the net");
             ui.horizontal(|ui| {
                 let name_label = ui.label("Your name: ");
                 ui.text_edit_singleline(&mut self.player.name)
@@ -291,7 +385,7 @@ impl eframe::App for NetrunnerGame {
             self.collapsible_stats_table(ui);
             if ui.button("take dmg").clicked() {
                 self.player.hp_down(10);
-                // self.terminal_lines.push("thanks bud".to_string())
+                self.terminal_print("Ouch!");
             }
             // list available networks
             self.list_available_networks(ui);
@@ -312,7 +406,7 @@ impl eframe::App for NetrunnerGame {
                 }
             };
             if ui.button("Go").clicked() {
-                self.terminal_print("thanks bud");
+                self.do_task()
             }
             ui.separator();
             display_terminal(ui, &self.terminal_lines);
