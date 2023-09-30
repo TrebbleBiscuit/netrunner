@@ -51,6 +51,11 @@ impl Player {
     fn max_ram(&self) -> i32 {
         return 100;
     }
+
+    fn available_skill_points(&self) -> i32 {
+        // debug - for now, 14 points is the max
+        return 14 - self.skills.total_points();
+    }
 }
 
 impl Default for Player {
@@ -152,20 +157,8 @@ impl NetrunnerGame {
     }
 
     fn player_stats_table(&mut self, ui: &mut egui::Ui) {
-        let can_add_skills = self.player.skills.total_points() < 14; // temp debug
         egui::Grid::new("some_unique_id").show(ui, |ui| {
-            // row 1: atk/def stats
-            ui.horizontal(|ui| {
-                ui.label("ATK: ");
-                ui_counter(ui, &mut self.player.skills.hacking, can_add_skills);
-            });
-            ui.horizontal(|ui| {
-                ui.separator();
-                ui.label("DEF: ");
-                ui_counter(ui, &mut self.player.skills.firewall, can_add_skills);
-            });
-            ui.end_row();
-            // row 2: hp and ram stats
+            // row: hp and ram stats
             ui.label(colored_label("HP", self.player.hp, self.player.max_hp()));
             ui.horizontal(|ui| {
                 ui.separator();
@@ -173,6 +166,37 @@ impl NetrunnerGame {
             });
             ui.end_row();
         });
+    }
+
+    fn collapsible_stats_table(&mut self, ui: &mut egui::Ui) {
+        let pts = self.player.available_skill_points();
+        let id = ui.make_persistent_id("my_collapsing_header");
+        egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, false)
+            .show_header(ui, |ui| {
+                ui.label("Player Stats");
+                if pts > 0 {
+                    ui.label(format!("- {} points available", pts));
+                }
+            })
+            .body(|ui| {
+                let can_add_skills: bool = pts > 0;
+                egui::Grid::new("some_unique_id").show(ui, |ui| {
+                    // row: atk/def stats
+                    ui.horizontal(|ui| {
+                        ui.label("ATK: ");
+                        ui_counter(ui, &mut self.player.skills.hacking, can_add_skills);
+                    });
+                    ui.horizontal(|ui| {
+                        ui.separator();
+                        ui.label("DEF: ");
+                        ui_counter(ui, &mut self.player.skills.firewall, can_add_skills);
+                    });
+                    ui.end_row();
+                });
+            });
+
+        // egui::CollapsingHeader::new(label.as_str()).show(ui, |ui| {
+        // });
     }
 
     fn list_available_networks(&mut self, ui: &mut egui::Ui) {
@@ -263,6 +287,8 @@ impl eframe::App for NetrunnerGame {
                     .labelled_by(name_label.id);
             });
             self.player_stats_table(ui);
+            ui.separator();
+            self.collapsible_stats_table(ui);
             if ui.button("take dmg").clicked() {
                 self.player.hp_down(10);
                 // self.terminal_lines.push("thanks bud".to_string())
