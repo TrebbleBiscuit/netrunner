@@ -56,7 +56,7 @@ impl Player {
 impl Default for Player {
     fn default() -> Self {
         Self {
-            name: "Anonymous".to_string(),
+            name: random_default_name(),
             skills: Skills::default(),
             hp: 100,
             ram: 50,
@@ -104,9 +104,9 @@ enum Networks {
 
 #[derive(PartialEq)]
 enum Tasks {
-    SearchTasks,
-    Datamine,       // collect data from net
-    SocialPractice, // level up social skill?
+    Search,
+    Datamine, // collect data from net
+    Social,   // level up social skill?
 }
 
 fn random_default_name() -> String {
@@ -127,7 +127,6 @@ fn random_default_name() -> String {
 
 struct NetrunnerGame {
     player: Player,
-    name: String,
     terminal_lines: Vec<String>,
     current_net: Networks,
     current_task: Tasks,
@@ -137,7 +136,6 @@ impl Default for NetrunnerGame {
     fn default() -> Self {
         Self {
             player: Player::default(),
-            name: random_default_name(),
             terminal_lines: vec![
                 "welcome to cybergame".to_string(),
                 "strap in, choomba".to_string(),
@@ -192,7 +190,7 @@ impl NetrunnerGame {
             if ui
                 .add(egui::RadioButton::new(
                     self.current_net == Networks::SIPRnet,
-                    "Internet",
+                    "SIPRnet",
                 ))
                 .clicked()
             {
@@ -231,13 +229,14 @@ fn display_terminal(ui: &mut egui::Ui, terminal_lines: &Vec<String>) {
 
 fn internet_tasks(ui: &mut egui::Ui, current_value: &mut Tasks) {
     ui.selectable_value(current_value, Tasks::Datamine, "Datamine");
-    ui.selectable_value(current_value, Tasks::SearchTasks, "Search around");
-    ui.selectable_value(current_value, Tasks::SocialPractice, "Socialize");
+    ui.selectable_value(current_value, Tasks::Search, "Search around");
+    ui.selectable_value(current_value, Tasks::Social, "Practice Socializing");
 }
 
 fn siprnet_tasks(ui: &mut egui::Ui, current_value: &mut Tasks) {
     ui.selectable_value(current_value, Tasks::Datamine, "Datamine");
-    ui.selectable_value(current_value, Tasks::SearchTasks, "Search around");
+    ui.selectable_value(current_value, Tasks::Search, "Search around");
+    ui.selectable_value(current_value, Tasks::Social, "Social Engineering");
 }
 
 fn colored_label(label_txt: &str, current_val: i32, max_val: i32) -> egui::RichText {
@@ -260,11 +259,11 @@ impl eframe::App for NetrunnerGame {
             ui.heading("wake up cyberman");
             ui.horizontal(|ui| {
                 let name_label = ui.label("Your name: ");
-                ui.text_edit_singleline(&mut self.name)
+                ui.text_edit_singleline(&mut self.player.name)
                     .labelled_by(name_label.id);
             });
             self.player_stats_table(ui);
-            if ui.button("+").clicked() {
+            if ui.button("take dmg").clicked() {
                 self.player.hp_down(10);
                 // self.terminal_lines.push("thanks bud".to_string())
             }
