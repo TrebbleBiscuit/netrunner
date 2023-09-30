@@ -134,6 +134,30 @@ impl MyApp {
     fn terminal_print(&mut self, line: &str) {
         self.terminal_lines.push(line.to_string())
     }
+
+    fn player_stats_table(&mut self, ui: &mut egui::Ui) {
+        let can_add_skills = self.player.skills.total_points() < 14; // temp debug
+        egui::Grid::new("some_unique_id").show(ui, |ui| {
+            // row 1: atk/def stats
+            ui.horizontal(|ui| {
+                ui.label("ATK: ");
+                ui_counter(ui, &mut self.player.skills.hacking, can_add_skills);
+            });
+            ui.horizontal(|ui| {
+                ui.separator();
+                ui.label("DEF: ");
+                ui_counter(ui, &mut self.player.skills.firewall, can_add_skills);
+            });
+            ui.end_row();
+            // row 2: hp and ram stats
+            ui.label(colored_label("HP", self.player.hp, self.player.max_hp()));
+            ui.horizontal(|ui| {
+                ui.separator();
+                ui.label(colored_label("RAM", self.player.ram, self.player.max_ram()));
+            });
+            ui.end_row();
+        });
+    }
 }
 
 fn ui_counter(ui: &mut egui::Ui, counter: &mut i32, can_add: bool) {
@@ -173,12 +197,14 @@ fn siprnet_tasks(ui: &mut egui::Ui, current_value: &mut Tasks) {
 
 fn colored_label(label_txt: &str, current_val: i32, max_val: i32) -> egui::RichText {
     // if hp < 50%, start tinting it red
+    let brightness = 160;
     let hp_ratio = current_val as f32 / max_val as f32;
-    let tint = ((255 * 2) as f32 * hp_ratio) as u8;
+    let darker_tint = ((brightness as f32 * 2.0) * hp_ratio) as u8;
+    let lighter_tint = brightness + ((0.5 - hp_ratio) * (255 - brightness) as f32) as u8;
     let label_color = if hp_ratio > 0.5 {
-        egui::Color32::WHITE
+        egui::Color32::from_rgb(brightness, brightness, brightness)
     } else {
-        egui::Color32::from_rgb(255, tint, tint)
+        egui::Color32::from_rgb(lighter_tint, darker_tint, darker_tint)
     };
     egui::RichText::new(format!("{}: {} / {}", label_txt, current_val, max_val)).color(label_color)
 }
@@ -192,35 +218,7 @@ impl eframe::App for MyApp {
                 ui.text_edit_singleline(&mut self.name)
                     .labelled_by(name_label.id);
             });
-            ui.horizontal(|ui| {
-                let can_add_skills = self.player.skills.total_points() < 14;
-                ui.label("ATK: ");
-                ui_counter(ui, &mut self.player.skills.hacking, can_add_skills);
-                ui.separator();
-                ui.label("DEF: ");
-                ui_counter(ui, &mut self.player.skills.firewall, can_add_skills);
-            });
-            ui.horizontal(|ui| {
-                ui.label(colored_label("HP", self.player.hp, self.player.max_hp()));
-                ui.separator();
-                ui.label(colored_label("RAM", self.player.ram, self.player.max_ram()));
-                // ui.add(egui::widgets::ProgressBar::new(
-                //     self.player.hp as f32 / self.player.max_hp() as f32,
-                // ));
-            });
-            ui.horizontal(|ui| {
-                // ui.label(
-                //     egui::RichText::new(format!(
-                //         "RAM: {} / {}",
-                //         self.player.ram,
-                //         self.player.max_ram()
-                //     ))
-                //     .color(egui::Color32::RED),
-                // );
-                // ui.add(egui::widgets::ProgressBar::new(
-                //     self.player.ram as f32 / self.player.max_ram() as f32,
-                // ));
-            });
+            self.player_stats_table(ui);
             if ui.button("+").clicked() {
                 self.player.hp_down(10);
                 // self.terminal_lines.push("thanks bud".to_string())
