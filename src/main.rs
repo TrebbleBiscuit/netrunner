@@ -19,14 +19,64 @@ fn main() -> Result<(), eframe::Error> {
     )
 }
 
+trait HasHealth {
+    fn get_hp(&self) -> i32;
+    fn max_hp(&self) -> i32;
+    fn set_hp(&mut self, amount: i32);
+
+    fn hp_up(&mut self, amount: i32) {
+        let healable_damage = self.max_hp() - self.get_hp();
+        if healable_damage == 0 {
+            return;
+        }
+        self.set_hp(self.max_hp().min(self.get_hp() + amount))
+    }
+
+    fn hp_down(&mut self, amount: i32) {
+        if amount > self.get_hp() {
+            // DEATH
+            self.set_hp(0);
+        } else {
+            self.set_hp(self.get_hp() - amount)
+        }
+    }
+}
+
+trait HasRam {
+    fn get_ram(&self) -> i32;
+    fn max_ram(&self) -> i32;
+    fn set_ram(&mut self, amount: i32);
+
+    fn ram_up(&mut self, amount: i32) {
+        let recoverable_ram = self.max_ram() - self.get_ram();
+        if recoverable_ram == 0 {
+            return;
+        }
+        self.set_ram(self.max_ram().min(self.get_ram() + amount))
+    }
+
+    fn ram_down(&mut self, amount: i32) {
+        if amount > self.get_ram() {
+            // DEATH
+            self.set_ram(0);
+        } else {
+            self.set_ram(self.get_ram() - amount)
+        }
+    }
+}
+
 struct Player {
     name: String,
     skills: Skills,
-    hp: CappedValue,
-    ram: CappedValue,
+    hp: i32,
+    ram: i32,
 }
 
 impl Player {
+    fn max_ram(&self) -> i32 {
+        return 100;
+    }
+
     fn available_skill_points(&self) -> i32 {
         // debug - for now, 14 points is the max
         return 14 - self.skills.total_points();
@@ -38,57 +88,33 @@ impl Default for Player {
         Self {
             name: random_default_name(),
             skills: Skills::default(),
-            hp: CappedValue(100, 100, CappedValueType::Health),
-            ram: CappedValue(50, 100, CappedValueType::Health),
+            hp: 100,
+            ram: 50,
         }
     }
 }
 
-enum CappedValueType {
-    Health,
-    Ram,
+impl HasHealth for Player {
+    fn get_hp(&self) -> i32 {
+        return self.hp;
+    }
+    fn max_hp(&self) -> i32 {
+        return 100;
+    }
+    fn set_hp(&mut self, amount: i32) {
+        self.hp = amount.min(self.max_hp())
+    }
 }
 
-struct CappedValue {
-    value: i32,
-    max: i32,
-    value_type: CappedValueType,
-}
-
-impl CappedValue {
-    fn new(value: i32, max: i32, value_type: CappedValueType) -> Self {
-        Self {
-            value: value,
-            max: max,
-            value_type: value_type,
-        }
+impl HasRam for Player {
+    fn get_ram(&self) -> i32 {
+        return self.ram;
     }
-
-    fn hit_zero(&self) {
-        match self.value_type {
-            CappedValueType::Health => {
-                // more code in here
-            }
-            CappedValueType::Ram => { /* less code in here */ }
-        }
+    fn max_ram(&self) -> i32 {
+        return 100;
     }
-
-    fn change_by(&mut self, amount: i32) {
-        let healable_damage = self.max - self.value;
-        if healable_damage == 0 {
-            return;
-        }
-        if healable_damage > 0 {
-            self.value = self.max.min(self.value + amount)
-        } else {
-            if amount > self.value {
-                // TODO: now what?
-                self.value = 0;
-                self.hit_zero()
-            } else {
-                self.value = self.value - amount
-            }
-        }
+    fn set_ram(&mut self, amount: i32) {
+        self.ram = amount.min(self.max_ram())
     }
 }
 
