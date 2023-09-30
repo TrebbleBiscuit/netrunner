@@ -1,6 +1,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
 
 use eframe::egui;
+use rand::seq::SliceRandom;
+use rand::thread_rng;
 
 fn main() -> Result<(), eframe::Error> {
     // env_logger::init(); // Log to stderr (if you run with `RUST_LOG=debug`).
@@ -11,7 +13,7 @@ fn main() -> Result<(), eframe::Error> {
     eframe::run_native(
         "cybergame",
         options,
-        Box::new(|_cc| Box::<MyApp>::default()),
+        Box::new(|_cc| Box::<NetrunnerGame>::default()),
     )
 }
 
@@ -107,7 +109,23 @@ enum Tasks {
     SocialPractice, // level up social skill?
 }
 
-struct MyApp {
+fn random_default_name() -> String {
+    let vs: Vec<&str> = vec![
+        "riftrunner",
+        "astralByte",
+        "digital-nomad",
+        "pulse-echo",
+        "ShadowSync",
+        "NovaHaxD",
+        "CYPHER",
+        "Aki Zeta-5",
+        "Prime Function",
+        "Nexus-11",
+    ];
+    return vs.choose(&mut thread_rng()).unwrap().to_string();
+}
+
+struct NetrunnerGame {
     player: Player,
     name: String,
     terminal_lines: Vec<String>,
@@ -115,11 +133,11 @@ struct MyApp {
     current_task: Tasks,
 }
 
-impl Default for MyApp {
+impl Default for NetrunnerGame {
     fn default() -> Self {
         Self {
             player: Player::default(),
-            name: "Cyberpunk".to_owned(),
+            name: random_default_name(),
             terminal_lines: vec![
                 "welcome to cybergame".to_string(),
                 "strap in, choomba".to_string(),
@@ -130,7 +148,7 @@ impl Default for MyApp {
     }
 }
 
-impl MyApp {
+impl NetrunnerGame {
     fn terminal_print(&mut self, line: &str) {
         self.terminal_lines.push(line.to_string())
     }
@@ -156,6 +174,32 @@ impl MyApp {
                 ui.label(colored_label("RAM", self.player.ram, self.player.max_ram()));
             });
             ui.end_row();
+        });
+    }
+
+    fn list_available_networks(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            ui.label("Network: ");
+            if ui
+                .add(egui::RadioButton::new(
+                    self.current_net == Networks::Internet,
+                    "Internet",
+                ))
+                .clicked()
+            {
+                self.current_net = Networks::Internet
+            }
+            if ui
+                .add(egui::RadioButton::new(
+                    self.current_net == Networks::SIPRnet,
+                    "Internet",
+                ))
+                .clicked()
+            {
+                self.current_net = Networks::SIPRnet
+            }
+            // ui.radio_value(&mut self.current_net, Networks::Internet, "Internet");
+            // ui.radio_value(&mut self.current_net, Networks::SIPRnet, "SIPRnet");
         });
     }
 }
@@ -186,13 +230,14 @@ fn display_terminal(ui: &mut egui::Ui, terminal_lines: &Vec<String>) {
 }
 
 fn internet_tasks(ui: &mut egui::Ui, current_value: &mut Tasks) {
+    ui.selectable_value(current_value, Tasks::Datamine, "Datamine");
     ui.selectable_value(current_value, Tasks::SearchTasks, "Search around");
     ui.selectable_value(current_value, Tasks::SocialPractice, "Socialize");
 }
 
 fn siprnet_tasks(ui: &mut egui::Ui, current_value: &mut Tasks) {
-    ui.selectable_value(current_value, Tasks::SearchTasks, "Search around");
     ui.selectable_value(current_value, Tasks::Datamine, "Datamine");
+    ui.selectable_value(current_value, Tasks::SearchTasks, "Search around");
 }
 
 fn colored_label(label_txt: &str, current_val: i32, max_val: i32) -> egui::RichText {
@@ -209,7 +254,7 @@ fn colored_label(label_txt: &str, current_val: i32, max_val: i32) -> egui::RichT
     egui::RichText::new(format!("{}: {} / {}", label_txt, current_val, max_val)).color(label_color)
 }
 
-impl eframe::App for MyApp {
+impl eframe::App for NetrunnerGame {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.heading("wake up cyberman");
@@ -224,11 +269,7 @@ impl eframe::App for MyApp {
                 // self.terminal_lines.push("thanks bud".to_string())
             }
             // list available networks
-            ui.horizontal(|ui| {
-                ui.label("Network: ");
-                ui.radio_value(&mut self.current_net, Networks::Internet, "Internet");
-                ui.radio_value(&mut self.current_net, Networks::SIPRnet, "SIPRnet");
-            });
+            self.list_available_networks(ui);
             // list available tasks
             ui.horizontal(|ui| {
                 ui.label("Task: ");
