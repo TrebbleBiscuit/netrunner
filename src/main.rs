@@ -19,64 +19,15 @@ fn main() -> Result<(), eframe::Error> {
     )
 }
 
-trait HasHealth {
-    fn get_hp(&self) -> i32;
-    fn max_hp(&self) -> i32;
-    fn set_hp(&mut self, amount: i32);
-
-    fn hp_up(&mut self, amount: i32) {
-        let healable_damage = self.max_hp() - self.get_hp();
-        if healable_damage == 0 {
-            return;
-        }
-        self.set_hp(self.max_hp().min(self.get_hp() + amount))
-    }
-
-    fn hp_down(&mut self, amount: i32) {
-        if amount > self.get_hp() {
-            // DEATH
-            self.set_hp(0);
-        } else {
-            self.set_hp(self.get_hp() - amount)
-        }
-    }
-}
-
-trait HasRam {
-    fn get_ram(&self) -> i32;
-    fn max_ram(&self) -> i32;
-    fn set_ram(&mut self, amount: i32);
-
-    fn ram_up(&mut self, amount: i32) {
-        let recoverable_ram = self.max_ram() - self.get_ram();
-        if recoverable_ram == 0 {
-            return;
-        }
-        self.set_ram(self.max_ram().min(self.get_ram() + amount))
-    }
-
-    fn ram_down(&mut self, amount: i32) {
-        if amount > self.get_ram() {
-            // DEATH
-            self.set_ram(0);
-        } else {
-            self.set_ram(self.get_ram() - amount)
-        }
-    }
-}
-
 struct Player {
     name: String,
     skills: Skills,
-    hp: i32,
-    ram: i32,
+    hp: CappedValue,
+    ram: CappedValue,
+    credits: i32,
 }
 
 impl Player {
-    fn max_ram(&self) -> i32 {
-        return 100;
-    }
-
     fn available_skill_points(&self) -> i32 {
         // debug - for now, 14 points is the max
         return 14 - self.skills.total_points();
@@ -88,33 +39,47 @@ impl Default for Player {
         Self {
             name: random_default_name(),
             skills: Skills::default(),
-            hp: 100,
-            ram: 50,
+            hp: CappedValue::new(100, 100, CappedValueType::Health),
+            ram: CappedValue::new(50, 100, CappedValueType::Ram),
+            credits: 100,
         }
     }
 }
 
-impl HasHealth for Player {
-    fn get_hp(&self) -> i32 {
-        return self.hp;
-    }
-    fn max_hp(&self) -> i32 {
-        return 100;
-    }
-    fn set_hp(&mut self, amount: i32) {
-        self.hp = amount.min(self.max_hp())
-    }
+enum CappedValueType {
+    Health,
+    Ram,
 }
 
-impl HasRam for Player {
-    fn get_ram(&self) -> i32 {
-        return self.ram;
+struct CappedValue {
+    value: i32,
+    upper_limit: i32,
+    value_type: CappedValueType,
+}
+
+impl CappedValue {
+    fn new(value: i32, upper_limit: i32, value_type: CappedValueType) -> Self {
+        Self {
+            value: value,
+            upper_limit: upper_limit,
+            value_type: value_type,
+        }
     }
-    fn max_ram(&self) -> i32 {
-        return 100;
+
+    fn hit_zero(&self) {
+        match self.value_type {
+            CappedValueType::Health => {
+                println!("oh no you're dead")
+            }
+            CappedValueType::Ram => println!("oh no you're out of RAM"),
+        }
     }
-    fn set_ram(&mut self, amount: i32) {
-        self.ram = amount.min(self.max_ram())
+
+    fn change_by(&mut self, amount: i32) {
+        self.value = self.upper_limit.min((self.value + amount).max(0));
+        if self.value == 0 {
+            self.hit_zero();
+        }
     }
 }
 
@@ -193,8 +158,8 @@ impl Default for NetrunnerGame {
 impl NetrunnerGame {
     fn do_task(&mut self) {
         let difficulty = match self.current_net {
-            Networks::Internet => 1.0,
-            Networks::SIPRnet => 3.0,
+            Networks::Internet => 1.5,
+            Networks::SIPRnet => 3.5,
         };
 
         match self.current_task {
@@ -224,18 +189,18 @@ impl NetrunnerGame {
         let success_chance = 0.8;
         if utils::roll_encounter(1.0 - success_chance) {
             // minor good thing - search success
-            let reward_amount: i32 = (roll_success * difficulty * 3.0).ceil() as i32;
-            self.player.ram_up(reward_amount);
+            let reward_amount: i32 = (roll_success * difficulty * 2.5).ceil() as i32;
+            self.player.credits += reward_amount;
             self.terminal_print(
-                format!("You found some interesting data. You gained {} RAM", {
+                format!("You found some interesting data worth {} credits", {
                     reward_amount
                 })
                 .as_str(),
             );
         } else {
             // bad thing - encounter
-            let damage_amount = (roll_success * difficulty * 2.0).floor() as i32;
-            self.player.hp_down(damage_amount);
+            let damage_amount = (roll_success * difficulty * 2.0).ceil() as i32;
+            self.player.hp.change_by(-damage_amount);
             self.terminal_print(
                 format!(
                     "You run into a nasty piece of malware that does {} damage.",
@@ -253,10 +218,18 @@ impl NetrunnerGame {
     fn player_stats_table(&mut self, ui: &mut egui::Ui) {
         egui::Grid::new("some_unique_id").show(ui, |ui| {
             // row: hp and ram stats
-            ui.label(colored_label("HP", self.player.hp, self.player.max_hp()));
+            ui.label(colored_label(
+                "HP",
+                self.player.hp.value,
+                self.player.hp.upper_limit,
+            ));
             ui.horizontal(|ui| {
                 ui.separator();
-                ui.label(colored_label("RAM", self.player.ram, self.player.max_ram()));
+                ui.label(colored_label(
+                    "RAM",
+                    self.player.ram.value,
+                    self.player.ram.upper_limit,
+                ));
             });
             ui.end_row();
         });
@@ -384,7 +357,7 @@ impl eframe::App for NetrunnerGame {
             ui.separator();
             self.collapsible_stats_table(ui);
             if ui.button("take dmg").clicked() {
-                self.player.hp_down(10);
+                self.player.hp.change_by(-10);
                 self.terminal_print("Ouch!");
             }
             // list available networks
