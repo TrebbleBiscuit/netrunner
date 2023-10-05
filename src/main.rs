@@ -3,13 +3,14 @@
 use eframe::egui;
 use rand::seq::SliceRandom;
 use rand::{thread_rng, Rng};
+use std::fmt;
 
 mod utils;
 
 fn main() -> Result<(), eframe::Error> {
     // env_logger::init(); // Log to stderr (if you run with `RUST_LOG=debug`).
     let options = eframe::NativeOptions {
-        initial_window_size: Some(egui::vec2(320.0, 240.0)),
+        initial_window_size: Some(egui::vec2(450.0, 300.0)),
         ..Default::default()
     };
     eframe::run_native(
@@ -19,12 +20,45 @@ fn main() -> Result<(), eframe::Error> {
     )
 }
 
+#[derive(Debug)]
+enum Disposition {
+    Neutral,
+    Hostile,
+}
+
+impl fmt::Display for Disposition {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{:?}", self)
+        // or, alternatively:
+        // fmt::Debug::fmt(self, f)
+    }
+}
+
+struct Contact {
+    name: String,
+    hp: CappedValue,
+    skills: Skills,
+    disposition: Disposition,
+}
+
+impl Default for Contact {
+    fn default() -> Self {
+        Self {
+            name: random_hostile_name(),
+            hp: CappedValue::new(30, 30, CappedValueType::Health),
+            skills: Skills::default(),
+            disposition: Disposition::Hostile,
+        }
+    }
+}
+
 struct Player {
     name: String,
     skills: Skills,
     hp: CappedValue,
     ram: CappedValue,
     credits: i32,
+    xp: i32,
 }
 
 impl Player {
@@ -42,6 +76,7 @@ impl Default for Player {
             hp: CappedValue::new(100, 100, CappedValueType::Health),
             ram: CappedValue::new(50, 100, CappedValueType::Ram),
             credits: 100,
+            xp: 0,
         }
     }
 }
@@ -67,12 +102,12 @@ impl CappedValue {
     }
 
     fn hit_zero(&self) {
-        match self.value_type {
-            CappedValueType::Health => {
-                println!("oh no you're dead")
-            }
-            CappedValueType::Ram => println!("oh no you're out of RAM"),
-        }
+        // match self.value_type {
+        //     CappedValueType::Health => {
+        //         println!("oh no you're dead")
+        //     }
+        //     CappedValueType::Ram => println!("oh no you're out of RAM"),
+        // }
     }
 
     fn change_by(&mut self, amount: i32) {
@@ -113,7 +148,7 @@ enum Networks {
 enum Tasks {
     Search,
     Datamine, // collect data from net
-    Social,   // level up social skill?
+              // Social,   // level up social skill?
 }
 
 fn random_default_name() -> String {
@@ -132,18 +167,38 @@ fn random_default_name() -> String {
     return vs.choose(&mut thread_rng()).unwrap().to_string();
 }
 
+fn random_hostile_name() -> String {
+    let vs: Vec<&str> = vec![
+        "adware-imp",
+        "script kiddie bot",
+        "SpamSpyder",
+        "darknet-dragon",
+        "silent-strike",
+        "phantom_protocol",
+    ];
+    return vs.choose(&mut thread_rng()).unwrap().to_string();
+}
+
+enum GameState {
+    FreeRoam,
+    Combat,
+}
+
 struct NetrunnerGame {
     player: Player,
+    state: GameState,
     terminal_lines: Vec<String>,
     current_net: Networks,
     current_task: Tasks,
     turn: i32,
+    contacts: Vec<Contact>,
 }
 
 impl Default for NetrunnerGame {
     fn default() -> Self {
         Self {
             player: Player::default(),
+            state: GameState::FreeRoam,
             terminal_lines: vec![
                 "welcome to cybergame".to_string(),
                 "strap in, choomba".to_string(),
@@ -151,11 +206,42 @@ impl Default for NetrunnerGame {
             current_net: Networks::Internet,
             current_task: Tasks::Datamine,
             turn: 1,
+            contacts: Vec::new(),
         }
     }
 }
 
 impl NetrunnerGame {
+    fn combat_attack(&mut self) {
+        self.turn += 1;
+        let mut dead_hostiles = vec![];
+        let mut print_lines = vec![];
+        for (index, contact) in self.contacts.iter_mut().enumerate() {
+            let dmg_to_hostile = (2 * self.player.skills.hacking) - contact.skills.firewall;
+            let dmg_to_player = 2 + contact.skills.hacking - self.player.skills.firewall;
+            self.player.hp.change_by(-dmg_to_player);
+            contact.hp.change_by(-dmg_to_hostile);
+            print_lines.push(format!(
+                "You deal {} damage to {}.",
+                dmg_to_hostile, contact.name
+            ));
+            print_lines.push(format!(
+                "You take {} damage from {}.",
+                dmg_to_player, contact.name
+            ));
+            if contact.hp.value <= 0 {
+                dead_hostiles.push(index)
+            }
+        }
+        for dead_index in dead_hostiles.iter().rev() {
+            // remove dead contacts
+            self.contacts.remove(*dead_index);
+        }
+        for line in &print_lines {
+            self.terminal_print(line);
+        }
+    }
+
     fn do_task(&mut self) {
         let difficulty = match self.current_net {
             Networks::Internet => 1.5,
@@ -167,11 +253,12 @@ impl NetrunnerGame {
                 self.do_task_search(difficulty);
             }
             Tasks::Datamine => self.terminal_print("Nah, you don't want to do that."),
-            Tasks::Social => self.terminal_print("Nah, you don't want to do that."),
+            // Tasks::Social => self.terminal_print("Nah, you don't want to do that."),
         }
     }
 
     fn do_task_search(&mut self, difficulty: f32) {
+        self.turn += 1;
         let mut rng = thread_rng();
         let net_name = match self.current_net {
             Networks::Internet => "the internet",
@@ -291,6 +378,25 @@ impl NetrunnerGame {
             // ui.radio_value(&mut self.current_net, Networks::SIPRnet, "SIPRnet");
         });
     }
+
+    fn combat_window(&mut self, ui: &mut egui::Ui) {
+        for contact in &self.contacts {
+            // ui.horizontal(|ui| {
+            ui.label(format!("Contact: {}", contact.name));
+            ui.label(format!(
+                "HP: {}/{}",
+                contact.hp.value, contact.hp.upper_limit
+            ));
+            ui.label(format!("Disposition: {}", contact.disposition));
+            // });
+        }
+        if ui.button("Launch Offensive Hack").clicked() {
+            self.combat_attack();
+        }
+        if ui.button("Exit Combat").clicked() {
+            self.state = GameState::FreeRoam;
+        }
+    }
 }
 
 fn ui_counter(ui: &mut egui::Ui, counter: &mut i32, can_add: bool) {
@@ -321,13 +427,13 @@ fn display_terminal(ui: &mut egui::Ui, terminal_lines: &Vec<String>) {
 fn internet_tasks(ui: &mut egui::Ui, current_value: &mut Tasks) {
     ui.selectable_value(current_value, Tasks::Datamine, "Datamine");
     ui.selectable_value(current_value, Tasks::Search, "Search around");
-    ui.selectable_value(current_value, Tasks::Social, "Practice Socializing");
+    // ui.selectable_value(current_value, Tasks::Social, "Practice Socializing");
 }
 
 fn siprnet_tasks(ui: &mut egui::Ui, current_value: &mut Tasks) {
     ui.selectable_value(current_value, Tasks::Datamine, "Datamine");
     ui.selectable_value(current_value, Tasks::Search, "Search around");
-    ui.selectable_value(current_value, Tasks::Social, "Social Engineering");
+    // ui.selectable_value(current_value, Tasks::Social, "Social Engineering");
 }
 
 fn colored_label(label_txt: &str, current_val: i32, max_val: i32) -> egui::RichText {
@@ -346,8 +452,19 @@ fn colored_label(label_txt: &str, current_val: i32, max_val: i32) -> egui::RichT
 
 impl eframe::App for NetrunnerGame {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        egui::CentralPanel::default().show(ctx, |ui| {
+        egui::TopBottomPanel::top("my_panel").show(ctx, |ui| {
             ui.heading("welcome to the net");
+        });
+        match self.state {
+            GameState::FreeRoam => {}
+            GameState::Combat => {
+                egui::Window::new("Combat Window").show(ctx, |ui| {
+                    self.combat_window(ui);
+                });
+            }
+        }
+
+        egui::CentralPanel::default().show(ctx, |ui| {
             ui.horizontal(|ui| {
                 let name_label = ui.label("Your name: ");
                 ui.text_edit_singleline(&mut self.player.name)
@@ -356,10 +473,6 @@ impl eframe::App for NetrunnerGame {
             self.player_stats_table(ui);
             ui.separator();
             self.collapsible_stats_table(ui);
-            if ui.button("take dmg").clicked() {
-                self.player.hp.change_by(-10);
-                self.terminal_print("Ouch!");
-            }
             // list available networks
             self.list_available_networks(ui);
             // list available tasks
@@ -380,6 +493,10 @@ impl eframe::App for NetrunnerGame {
             };
             if ui.button("Go").clicked() {
                 self.do_task()
+            }
+            if ui.button("Enter Combat").clicked() {
+                self.state = GameState::Combat;
+                self.contacts.push(Contact::default())
             }
             ui.separator();
             display_terminal(ui, &self.terminal_lines);
