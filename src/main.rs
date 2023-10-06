@@ -52,8 +52,19 @@ impl Default for Contact {
     }
 }
 
+struct PlayerStats {
+    kills: u32,
+}
+
+impl Default for PlayerStats {
+    fn default() -> Self {
+        Self { kills: 0 }
+    }
+}
+
 struct Player {
     name: String,
+    stats: PlayerStats,
     skills: Skills,
     hp: CappedValue,
     ram: CappedValue,
@@ -72,6 +83,7 @@ impl Default for Player {
     fn default() -> Self {
         Self {
             name: random_default_name(),
+            stats: PlayerStats::default(),
             skills: Skills::default(),
             hp: CappedValue::new(100, 100, CappedValueType::Health),
             ram: CappedValue::new(50, 100, CappedValueType::Ram),
@@ -230,12 +242,16 @@ impl NetrunnerGame {
                 dmg_to_player, contact.name
             ));
             if contact.hp.value <= 0 {
-                dead_hostiles.push(index)
+                dead_hostiles.push(index);
+                self.player.stats.kills += 1;
             }
         }
         for dead_index in dead_hostiles.iter().rev() {
             // remove dead contacts
             self.contacts.remove(*dead_index);
+        }
+        if self.contacts.len() == 0 {
+            self.state = GameState::FreeRoam;
         }
         for line in &print_lines {
             self.terminal_print(line);
@@ -252,8 +268,42 @@ impl NetrunnerGame {
             Tasks::Search => {
                 self.do_task_search(difficulty);
             }
-            Tasks::Datamine => self.terminal_print("Nah, you don't want to do that."),
-            // Tasks::Social => self.terminal_print("Nah, you don't want to do that."),
+            Tasks::Datamine => {
+                self.do_task_datamine(difficulty);
+            } // Tasks::Social => self.terminal_print("Nah, you don't want to do that."),
+        }
+    }
+
+    fn do_task_datamine(&mut self, difficulty: f32) {
+        self.turn += 1;
+        let mut rng = thread_rng();
+        let flavor_name = match self.current_net {
+            Networks::Internet => "publically available databases",
+            Networks::SIPRnet => "classified databases",
+        };
+        self.terminal_print(format!("You search for {} to datamine.", { flavor_name }).as_str());
+        let success_chance = 0.8;
+        let roll_success: f32 = rng.gen();
+        if utils::roll_encounter(1.0 - success_chance) {
+            // earn credits
+            let reward_amount: i32 = (roll_success * difficulty * 2.5).ceil() as i32;
+            self.player.credits += reward_amount;
+            self.terminal_print(
+                format!("You found some interesting data worth {} credits", {
+                    reward_amount
+                })
+                .as_str(),
+            );
+        } else {
+            // regen ram
+            let reward_amount: i32 = (roll_success * difficulty * 2.5).ceil() as i32;
+            self.player.ram.change_by(reward_amount);
+            self.terminal_print(
+                format!("You don't find any new data, but regenerate {} RAM", {
+                    reward_amount
+                })
+                .as_str(),
+            );
         }
     }
 
@@ -286,15 +336,16 @@ impl NetrunnerGame {
             );
         } else {
             // bad thing - encounter
-            let damage_amount = (roll_success * difficulty * 2.0).ceil() as i32;
-            self.player.hp.change_by(-damage_amount);
+            let new_contact = Contact::default();
+            let contact_name = new_contact.name.clone();
+            self.contacts.push(new_contact);
             self.terminal_print(
-                format!(
-                    "You run into a nasty piece of malware that does {} damage.",
-                    { damage_amount }
-                )
+                format!("You run into a nasty piece of malware - {}", {
+                    contact_name
+                })
                 .as_str(),
             );
+            self.state = GameState::Combat;
         }
     }
 
@@ -395,6 +446,8 @@ impl NetrunnerGame {
         }
         if ui.button("Exit Combat").clicked() {
             self.state = GameState::FreeRoam;
+            self.contacts.clear();
+            self.terminal_print("You escape from combat.")
         }
     }
 }
@@ -494,10 +547,10 @@ impl eframe::App for NetrunnerGame {
             if ui.button("Go").clicked() {
                 self.do_task()
             }
-            if ui.button("Enter Combat").clicked() {
-                self.state = GameState::Combat;
-                self.contacts.push(Contact::default())
-            }
+            // if ui.button("DEBUG: Enter Combat").clicked() {
+            //     self.state = GameState::Combat;
+            //     self.contacts.push(Contact::default())
+            // }
             ui.separator();
             display_terminal(ui, &self.terminal_lines);
         });
