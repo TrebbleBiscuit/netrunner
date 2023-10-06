@@ -29,8 +29,6 @@ enum Disposition {
 impl fmt::Display for Disposition {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{:?}", self)
-        // or, alternatively:
-        // fmt::Debug::fmt(self, f)
     }
 }
 
@@ -50,6 +48,11 @@ impl Default for Contact {
             disposition: Disposition::Hostile,
         }
     }
+}
+
+enum Upgrade {
+    HPMaxUpLevel1,
+    RAMMaxUpLevel1,
 }
 
 struct PlayerStats {
@@ -150,10 +153,16 @@ impl Default for Skills {
     }
 }
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Debug)]
 enum Networks {
     Internet,
     SIPRnet,
+}
+
+impl fmt::Display for Networks {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{:?}", self)
+    }
 }
 
 #[derive(PartialEq)]
@@ -191,9 +200,16 @@ fn random_hostile_name() -> String {
     return vs.choose(&mut thread_rng()).unwrap().to_string();
 }
 
+#[derive(Clone, Copy)]
+enum InteractionType {
+    BasicShop,
+    AdvancedShop,
+}
+
 enum GameState {
     FreeRoam,
     Combat,
+    Interacting(InteractionType),
 }
 
 struct NetrunnerGame {
@@ -272,6 +288,17 @@ impl NetrunnerGame {
                 self.do_task_datamine(difficulty);
             } // Tasks::Social => self.terminal_print("Nah, you don't want to do that."),
         }
+    }
+
+    fn go_shopping(&mut self) {
+        let net_name = match self.current_net {
+            Networks::Internet => "the internet",
+            Networks::SIPRnet => "SIPRnet",
+        };
+        self.terminal_print(
+            format!("You see what's available for purchase on {}.", { net_name }).as_str(),
+        );
+        self.state = GameState::Interacting(InteractionType::BasicShop);
     }
 
     fn do_task_datamine(&mut self, difficulty: f32) {
@@ -515,6 +542,28 @@ impl eframe::App for NetrunnerGame {
                     self.combat_window(ui);
                 });
             }
+            GameState::Interacting(int_type) => {
+                egui::Window::new("Interaction Window").show(ctx, |ui| {
+                    match int_type {
+                        InteractionType::BasicShop => {
+                            ui.heading("welcome to the script kiddie shop");
+                            ui.horizontal(|ui| {
+                                ui.label("Thing 1");
+                                if ui.button("Buy it").clicked() {
+                                    self.terminal_print("ee bought ze dip")
+                                };
+                            });
+                        }
+
+                        InteractionType::AdvancedShop => {
+                            ui.heading("welcome to the elite hacker shop");
+                        }
+                    }
+                    if ui.button("Exit Shop").clicked() {
+                        self.state = GameState::FreeRoam;
+                    };
+                });
+            }
         }
 
         egui::CentralPanel::default().show(ctx, |ui| {
@@ -547,10 +596,9 @@ impl eframe::App for NetrunnerGame {
             if ui.button("Go").clicked() {
                 self.do_task()
             }
-            // if ui.button("DEBUG: Enter Combat").clicked() {
-            //     self.state = GameState::Combat;
-            //     self.contacts.push(Contact::default())
-            // }
+            if ui.button("DEBUG: Enter Shop").clicked() {
+                self.state = GameState::Interacting(InteractionType::BasicShop);
+            }
             ui.separator();
             display_terminal(ui, &self.terminal_lines);
         });
