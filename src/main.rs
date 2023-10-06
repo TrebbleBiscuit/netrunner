@@ -3,6 +3,7 @@
 use eframe::egui;
 use rand::seq::SliceRandom;
 use rand::{thread_rng, Rng};
+use std::collections::HashMap;
 use std::fmt;
 
 mod utils;
@@ -50,11 +51,6 @@ impl Default for Contact {
     }
 }
 
-enum Upgrade {
-    HPMaxUpLevel1,
-    RAMMaxUpLevel1,
-}
-
 struct PlayerStats {
     kills: u32,
 }
@@ -62,6 +58,45 @@ struct PlayerStats {
 impl Default for PlayerStats {
     fn default() -> Self {
         Self { kills: 0 }
+    }
+}
+
+#[derive(PartialEq, Eq, Hash)]
+enum PlayerUpgradeType {
+    HPMaxUp,
+}
+
+impl PlayerUpgradeType {
+    fn name(&self) -> String {
+        match *self {
+            PlayerUpgradeType::HPMaxUp => "HP Max +".to_string(),
+        }
+    }
+}
+
+struct PlayerUpgrade {
+    upgrade_type: PlayerUpgradeType,
+    level: u32,
+    base_cost: u32,
+    cost_per_level: u32,
+    unlocked: bool,
+}
+
+impl PlayerUpgrade {
+    fn cost(&self) -> u32 {
+        return self.base_cost + (self.level * self.cost_per_level);
+    }
+
+    fn upgrade_name(&self) -> String {
+        match self.upgrade_type {
+            PlayerUpgradeType::HPMaxUp => "HP Max +".to_string(),
+        }
+    }
+
+    fn upgrade_type(&self) -> PlayerUpgradeType {
+        match self.upgrade_type {
+            PlayerUpgradeType::HPMaxUp => PlayerUpgradeType::HPMaxUp,
+        }
     }
 }
 
@@ -73,6 +108,7 @@ struct Player {
     ram: CappedValue,
     credits: i32,
     xp: i32,
+    upgrades: HashMap<PlayerUpgradeType, PlayerUpgrade>,
 }
 
 impl Player {
@@ -84,6 +120,17 @@ impl Player {
 
 impl Default for Player {
     fn default() -> Self {
+        let mut upgrades = HashMap::new();
+        upgrades.insert(
+            PlayerUpgradeType::HPMaxUp,
+            PlayerUpgrade {
+                upgrade_type: PlayerUpgradeType::HPMaxUp,
+                level: 0,
+                cost_per_level: 50,
+                base_cost: 100,
+                unlocked: false,
+            },
+        );
         Self {
             name: random_default_name(),
             stats: PlayerStats::default(),
@@ -92,6 +139,7 @@ impl Default for Player {
             ram: CappedValue::new(50, 100, CappedValueType::Ram),
             credits: 100,
             xp: 0,
+            upgrades: upgrades,
         }
     }
 }
@@ -191,7 +239,7 @@ fn random_default_name() -> String {
 fn random_hostile_name() -> String {
     let vs: Vec<&str> = vec![
         "adware-imp",
-        "script kiddie bot",
+        "maniabot",
         "SpamSpyder",
         "darknet-dragon",
         "silent-strike",
@@ -291,6 +339,11 @@ impl NetrunnerGame {
     }
 
     fn go_shopping(&mut self) {
+        // gracefully transition the player into the shopping state
+
+        // set game state
+        self.state = GameState::Interacting(InteractionType::BasicShop);
+        // text in terminal
         let net_name = match self.current_net {
             Networks::Internet => "the internet",
             Networks::SIPRnet => "SIPRnet",
@@ -298,7 +351,6 @@ impl NetrunnerGame {
         self.terminal_print(
             format!("You see what's available for purchase on {}.", { net_name }).as_str(),
         );
-        self.state = GameState::Interacting(InteractionType::BasicShop);
     }
 
     fn do_task_datamine(&mut self, difficulty: f32) {
@@ -382,7 +434,7 @@ impl NetrunnerGame {
 
     fn player_stats_table(&mut self, ui: &mut egui::Ui) {
         egui::Grid::new("some_unique_id").show(ui, |ui| {
-            // row: hp and ram stats
+            // only one row: hp and ram stats
             ui.label(colored_label(
                 "HP",
                 self.player.hp.value,
@@ -395,6 +447,8 @@ impl NetrunnerGame {
                     self.player.ram.value,
                     self.player.ram.upper_limit,
                 ));
+                ui.separator();
+                ui.label(format!("Credits: {}", self.player.credits));
             });
             ui.end_row();
         });
@@ -477,6 +531,34 @@ impl NetrunnerGame {
             self.terminal_print("You escape from combat.")
         }
     }
+
+    fn shop_for_upgrades(&mut self, ui: &mut egui::Ui) {
+        let mut available_upgrades = vec![];
+        for (_, upgrade) in self.player.upgrades.iter() {
+            available_upgrades.push((upgrade.upgrade_type(), upgrade.cost().clone()))
+        }
+        for (up_type, up_cost) in available_upgrades.iter() {
+            ui.horizontal(|ui| {
+                ui.label(format!("'{}' for {}c", up_type.name(), up_cost));
+                if ui.button("Buy it").clicked() && self.player.credits >= *up_cost as i32 {
+                    self.player.credits -= *up_cost as i32;
+                    self.do_upgrade_effect(up_type);
+                    self.terminal_print(format!("You bought {}!", up_type.name()).as_str());
+                };
+            });
+        }
+    }
+
+    fn do_upgrade_effect(&mut self, upgrade: &PlayerUpgradeType) {
+        // increase upgrade level by 1 and apply the upgrade's effects
+        self.player.upgrades.get_mut(upgrade).unwrap().level += 1;
+        match upgrade {
+            PlayerUpgradeType::HPMaxUp => {
+                self.player.hp.upper_limit += 50;
+                self.player.hp.value += 50
+            }
+        }
+    }
 }
 
 fn ui_counter(ui: &mut egui::Ui, counter: &mut i32, can_add: bool) {
@@ -547,12 +629,7 @@ impl eframe::App for NetrunnerGame {
                     match int_type {
                         InteractionType::BasicShop => {
                             ui.heading("welcome to the script kiddie shop");
-                            ui.horizontal(|ui| {
-                                ui.label("Thing 1");
-                                if ui.button("Buy it").clicked() {
-                                    self.terminal_print("ee bought ze dip")
-                                };
-                            });
+                            self.shop_for_upgrades(ui);
                         }
 
                         InteractionType::AdvancedShop => {
@@ -597,7 +674,8 @@ impl eframe::App for NetrunnerGame {
                 self.do_task()
             }
             if ui.button("DEBUG: Enter Shop").clicked() {
-                self.state = GameState::Interacting(InteractionType::BasicShop);
+                // self.state = GameState::Interacting(InteractionType::BasicShop);
+                self.go_shopping();
             }
             ui.separator();
             display_terminal(ui, &self.terminal_lines);
