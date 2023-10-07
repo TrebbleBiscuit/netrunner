@@ -5,13 +5,14 @@ use rand::seq::SliceRandom;
 use rand::{thread_rng, Rng};
 use std::collections::HashMap;
 use std::fmt;
+use std::time::{Duration, Instant};
 
 mod utils;
 
 fn main() -> Result<(), eframe::Error> {
     // env_logger::init(); // Log to stderr (if you run with `RUST_LOG=debug`).
     let options = eframe::NativeOptions {
-        initial_window_size: Some(egui::vec2(450.0, 300.0)),
+        initial_window_size: Some(egui::vec2(450.0, 350.0)),
         ..Default::default()
     };
     eframe::run_native(
@@ -61,6 +62,16 @@ impl Default for PlayerStats {
     }
 }
 
+struct NetStats {
+    total_intel: f32,
+}
+
+impl Default for NetStats {
+    fn default() -> Self {
+        Self { total_intel: 0.0 }
+    }
+}
+
 #[derive(PartialEq, Eq, Hash)]
 enum PlayerUpgradeType {
     HPMaxUp,
@@ -102,8 +113,9 @@ impl PlayerUpgrade {
 
 struct Player {
     name: String,
-    stats: PlayerStats,
-    skills: Skills,
+    stats: PlayerStats, // track for posterity
+    net_stats: HashMap<Networks, NetStats>,
+    skills: Skills, // skills for checks and such
     hp: CappedValue,
     ram: CappedValue,
     credits: i32,
@@ -131,9 +143,13 @@ impl Default for Player {
                 unlocked: false,
             },
         );
+        let mut net_stats = HashMap::new();
+        net_stats.insert(Networks::Internet, NetStats::default());
+        net_stats.insert(Networks::SIPRnet, NetStats::default());
         Self {
             name: random_default_name(),
             stats: PlayerStats::default(),
+            net_stats: net_stats,
             skills: Skills::default(),
             hp: CappedValue::new(100, 100, CappedValueType::Health),
             ram: CappedValue::new(50, 100, CappedValueType::Ram),
@@ -201,10 +217,19 @@ impl Default for Skills {
     }
 }
 
-#[derive(PartialEq, Debug)]
+#[derive(Eq, PartialEq, Hash, Debug)]
 enum Networks {
     Internet,
     SIPRnet,
+}
+
+impl Networks {
+    fn difficulty(&self) -> f32 {
+        match *self {
+            Networks::Internet => 1.5,
+            Networks::SIPRnet => 3.5,
+        }
+    }
 }
 
 impl fmt::Display for Networks {
@@ -267,6 +292,7 @@ struct NetrunnerGame {
     current_net: Networks,
     current_task: Tasks,
     turn: i32,
+    last_frame_time: Instant,
     contacts: Vec<Contact>,
 }
 
@@ -282,6 +308,7 @@ impl Default for NetrunnerGame {
             current_net: Networks::Internet,
             current_task: Tasks::Datamine,
             turn: 1,
+            last_frame_time: Instant::now(),
             contacts: Vec::new(),
         }
     }
@@ -323,10 +350,7 @@ impl NetrunnerGame {
     }
 
     fn do_task(&mut self) {
-        let difficulty = match self.current_net {
-            Networks::Internet => 1.5,
-            Networks::SIPRnet => 3.5,
-        };
+        let difficulty = self.current_net.difficulty();
 
         match self.current_task {
             Tasks::Search => {
@@ -361,7 +385,7 @@ impl NetrunnerGame {
             Networks::SIPRnet => "classified databases",
         };
         self.terminal_print(format!("You search for {} to datamine.", { flavor_name }).as_str());
-        let success_chance = 0.8;
+        let success_chance = 0.6;
         let roll_success: f32 = rng.gen();
         if utils::roll_encounter(1.0 - success_chance) {
             // earn credits
@@ -375,7 +399,7 @@ impl NetrunnerGame {
             );
         } else {
             // regen ram
-            let reward_amount: i32 = (roll_success * difficulty * 2.5).ceil() as i32;
+            let reward_amount: i32 = (roll_success * 12.5 + difficulty).ceil() as i32;
             self.player.ram.change_by(reward_amount);
             self.terminal_print(
                 format!("You don't find any new data, but regenerate {} RAM", {
@@ -405,7 +429,7 @@ impl NetrunnerGame {
         let success_chance = 0.8;
         if utils::roll_encounter(1.0 - success_chance) {
             // minor good thing - search success
-            let reward_amount: i32 = (roll_success * difficulty * 2.5).ceil() as i32;
+            let reward_amount: i32 = (roll_success * difficulty * 4.5).ceil() as i32;
             self.player.credits += reward_amount;
             self.terminal_print(
                 format!("You found some interesting data worth {} credits", {
@@ -535,11 +559,16 @@ impl NetrunnerGame {
     fn shop_for_upgrades(&mut self, ui: &mut egui::Ui) {
         let mut available_upgrades = vec![];
         for (_, upgrade) in self.player.upgrades.iter() {
-            available_upgrades.push((upgrade.upgrade_type(), upgrade.cost().clone()))
+            available_upgrades.push((upgrade.upgrade_type(), upgrade.level, upgrade.cost()))
         }
-        for (up_type, up_cost) in available_upgrades.iter() {
+        for (up_type, up_lvl, up_cost) in available_upgrades.iter() {
             ui.horizontal(|ui| {
-                ui.label(format!("'{}' for {}c", up_type.name(), up_cost));
+                ui.label(format!(
+                    "'{}' level {} for {}c",
+                    up_type.name(),
+                    up_lvl + 1,
+                    up_cost
+                ));
                 if ui.button("Buy it").clicked() && self.player.credits >= *up_cost as i32 {
                     self.player.credits -= *up_cost as i32;
                     self.do_upgrade_effect(up_type);
@@ -614,8 +643,32 @@ fn colored_label(label_txt: &str, current_val: i32, max_val: i32) -> egui::RichT
 
 impl eframe::App for NetrunnerGame {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // set time_delta
+        let current_time = Instant::now();
+        let delta_time = current_time.duration_since(self.last_frame_time);
+        self.last_frame_time = current_time;
+        // 1 fps minimum even if unfocused
+        ctx.request_repaint_after(Duration::from_secs(1));
+
+        // adjust intel level over time
+        self.player
+            .net_stats
+            .get_mut(&self.current_net)
+            .unwrap()
+            .total_intel += delta_time.as_secs_f32() * 1.0;
+        let total_intel = self
+            .player
+            .net_stats
+            .get(&self.current_net)
+            .unwrap()
+            .total_intel;
+
+        // render GUI
         egui::TopBottomPanel::top("my_panel").show(ctx, |ui| {
-            ui.heading("welcome to the net");
+            ui.heading(format!(
+                "welcome to the net - latency: {} ms",
+                delta_time.as_millis()
+            ));
         });
         match self.state {
             GameState::FreeRoam => {}
@@ -634,6 +687,7 @@ impl eframe::App for NetrunnerGame {
 
                         InteractionType::AdvancedShop => {
                             ui.heading("welcome to the elite hacker shop");
+                            self.shop_for_upgrades(ui);
                         }
                     }
                     if ui.button("Exit Shop").clicked() {
@@ -650,10 +704,26 @@ impl eframe::App for NetrunnerGame {
                     .labelled_by(name_label.id);
             });
             self.player_stats_table(ui);
-            ui.separator();
             self.collapsible_stats_table(ui);
+            ui.separator();
             // list available networks
             self.list_available_networks(ui);
+            match self.current_net {
+                Networks::Internet => ui.label("You are browsing the public internet."),
+                Networks::SIPRnet => {
+                    ui.label("You are logged in to the US DoD's classified network.")
+                }
+            };
+            // network info
+            let per_level_cost = 100.0;
+            let intel_level = (total_intel / per_level_cost).floor();
+            ui.horizontal(|ui| {
+                ui.label(format!("Intel level: {:.2}", intel_level));
+                ui.add(egui::ProgressBar::new(
+                    (total_intel % per_level_cost) / per_level_cost,
+                ));
+            });
+            ui.separator();
             // list available tasks
             ui.horizontal(|ui| {
                 ui.label("Task: ");
@@ -664,20 +734,16 @@ impl eframe::App for NetrunnerGame {
                     }
                 }
             });
-            match self.current_net {
-                Networks::Internet => ui.label("You are browsing the public internet."),
-                Networks::SIPRnet => {
-                    ui.label("You are logged in to the US DoD's classified network.")
+            ui.horizontal(|ui| {
+                if ui.button("Go").clicked() {
+                    self.do_task()
                 }
-            };
-            if ui.button("Go").clicked() {
-                self.do_task()
-            }
-            if ui.button("DEBUG: Enter Shop").clicked() {
-                // self.state = GameState::Interacting(InteractionType::BasicShop);
-                self.go_shopping();
-            }
-            ui.separator();
+                if ui.button("Enter Shop").clicked() {
+                    // self.state = GameState::Interacting(InteractionType::BasicShop);
+                    self.go_shopping();
+                }
+            });
+
             display_terminal(ui, &self.terminal_lines);
         });
     }
