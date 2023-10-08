@@ -1,13 +1,16 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
 
 use eframe::egui;
-use rand::seq::SliceRandom;
-use rand::{random, thread_rng, Rng};
-use std::collections::HashMap;
-use std::fmt;
+use rand::{thread_rng, Rng};
 use std::time::{Duration, Instant};
 
+mod pieces;
+mod player;
 mod utils;
+
+use pieces::{Contact, Networks};
+use player::{Player, PlayerUpgradeType};
+use utils::roll_encounter;
 
 fn main() -> Result<(), eframe::Error> {
     // env_logger::init(); // Log to stderr (if you run with `RUST_LOG=debug`).
@@ -22,293 +25,11 @@ fn main() -> Result<(), eframe::Error> {
     )
 }
 
-#[derive(Debug)]
-enum Disposition {
-    Neutral,
-    Hostile,
-}
-
-impl fmt::Display for Disposition {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{:?}", self)
-    }
-}
-
-struct Contact {
-    name: String,
-    hp: CappedValue,
-    skills: Skills,
-    disposition: Disposition,
-}
-
-impl Contact {
-    fn new_from_level(level: i32) -> Self {
-        let total_skill_points = BASE_SKILL_POINTS * level;
-        let range: f32 = total_skill_points as f32 / 4.0;
-        let r_skill: i32 = ((total_skill_points as f32 / 2.0)
-            + ((random::<f32>() - 0.5) * 2.0 * range))
-            .round() as i32;
-        let health = 25 + (level * 5);
-        Self {
-            name: random_hostile_name(),
-            hp: CappedValue::new_health(health),
-            skills: Skills {
-                hacking: r_skill,
-                firewall: total_skill_points - r_skill,
-            },
-            disposition: Disposition::Hostile,
-        }
-    }
-}
-
-impl Default for Contact {
-    fn default() -> Self {
-        Self {
-            name: random_hostile_name(),
-            hp: CappedValue::new_health(30),
-            skills: Skills::default(),
-            disposition: Disposition::Hostile,
-        }
-    }
-}
-
-struct PlayerStats {
-    kills: u32,
-}
-
-impl Default for PlayerStats {
-    fn default() -> Self {
-        Self { kills: 0 }
-    }
-}
-
-struct NetStats {
-    total_intel: f32,
-}
-
-impl Default for NetStats {
-    fn default() -> Self {
-        Self { total_intel: 0.0 }
-    }
-}
-
-#[derive(PartialEq, Eq, Hash)]
-enum PlayerUpgradeType {
-    HPMaxUp,
-}
-
-impl PlayerUpgradeType {
-    fn name(&self) -> String {
-        match *self {
-            PlayerUpgradeType::HPMaxUp => "HP Max +".to_string(),
-        }
-    }
-}
-
-struct PlayerUpgrade {
-    upgrade_type: PlayerUpgradeType,
-    level: u32,
-    base_cost: u32,
-    cost_per_level: u32,
-    unlocked: bool,
-}
-
-impl PlayerUpgrade {
-    fn cost(&self) -> u32 {
-        return self.base_cost + (self.level * self.cost_per_level);
-    }
-
-    fn upgrade_name(&self) -> String {
-        match self.upgrade_type {
-            PlayerUpgradeType::HPMaxUp => "HP Max +".to_string(),
-        }
-    }
-
-    fn upgrade_type(&self) -> PlayerUpgradeType {
-        match self.upgrade_type {
-            PlayerUpgradeType::HPMaxUp => PlayerUpgradeType::HPMaxUp,
-        }
-    }
-}
-
-struct Player {
-    name: String,
-    stats: PlayerStats, // track for posterity
-    net_stats: HashMap<Networks, NetStats>,
-    skills: Skills, // skills for checks and such
-    hp: CappedValue,
-    ram: CappedValue,
-    credits: i32,
-    xp: i32,
-    upgrades: HashMap<PlayerUpgradeType, PlayerUpgrade>,
-}
-
-const BASE_SKILL_POINTS: i32 = 10;
-
-impl Player {
-    fn available_skill_points(&self) -> i32 {
-        // debug - for now, 12 points is the max
-        return BASE_SKILL_POINTS - self.skills.total_points();
-    }
-}
-
-impl Default for Player {
-    fn default() -> Self {
-        let mut upgrades = HashMap::new();
-        upgrades.insert(
-            PlayerUpgradeType::HPMaxUp,
-            PlayerUpgrade {
-                upgrade_type: PlayerUpgradeType::HPMaxUp,
-                level: 0,
-                cost_per_level: 50,
-                base_cost: 100,
-                unlocked: false,
-            },
-        );
-        let mut net_stats = HashMap::new();
-        net_stats.insert(Networks::Internet, NetStats::default());
-        net_stats.insert(Networks::SIPRnet, NetStats::default());
-        Self {
-            name: random_default_name(),
-            stats: PlayerStats::default(),
-            net_stats: net_stats,
-            skills: Skills::default(),
-            hp: CappedValue::new_health(100),
-            ram: CappedValue::new_ram(50, 100),
-            credits: 100,
-            xp: 0,
-            upgrades: upgrades,
-        }
-    }
-}
-
-enum CappedValueType {
-    Health,
-    Ram,
-}
-
-struct CappedValue {
-    value: i32,
-    upper_limit: i32,
-    value_type: CappedValueType,
-}
-
-impl CappedValue {
-    fn new(value: i32, upper_limit: i32, value_type: CappedValueType) -> Self {
-        Self {
-            value: value,
-            upper_limit: upper_limit,
-            value_type: value_type,
-        }
-    }
-
-    fn new_health(value: i32) -> Self {
-        Self {
-            value: value,
-            upper_limit: value,
-            value_type: CappedValueType::Health,
-        }
-    }
-
-    fn new_ram(value: i32, upper_limit: i32) -> Self {
-        Self {
-            value: value,
-            upper_limit: value,
-            value_type: CappedValueType::Ram,
-        }
-    }
-
-    fn hit_zero(&self) {
-        // match self.value_type {
-        //     CappedValueType::Health => {
-        //         println!("oh no you're dead")
-        //     }
-        //     CappedValueType::Ram => println!("oh no you're out of RAM"),
-        // }
-    }
-
-    fn change_by(&mut self, amount: i32) {
-        self.value = self.upper_limit.min((self.value + amount).max(0));
-        if self.value == 0 {
-            self.hit_zero();
-        }
-    }
-}
-
-struct Skills {
-    hacking: i32,
-    firewall: i32,
-}
-
-impl Skills {
-    fn total_points(&self) -> i32 {
-        return self.hacking + self.firewall;
-    }
-}
-
-impl Default for Skills {
-    fn default() -> Self {
-        Self {
-            hacking: 4,
-            firewall: 4,
-        }
-    }
-}
-
-#[derive(Eq, PartialEq, Hash, Debug)]
-enum Networks {
-    Internet,
-    SIPRnet,
-}
-
-impl Networks {
-    fn difficulty(&self) -> f32 {
-        match *self {
-            Networks::Internet => 1.0,
-            Networks::SIPRnet => 3.0,
-        }
-    }
-}
-
-impl fmt::Display for Networks {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{:?}", self)
-    }
-}
-
 #[derive(PartialEq)]
 enum Tasks {
     Search,
     Datamine, // collect data from net
               // Social,   // level up social skill?
-}
-
-fn random_default_name() -> String {
-    let vs: Vec<&str> = vec![
-        "riftrunner",
-        "astralByte",
-        "digital-nomad",
-        "pulse-echo",
-        "ShadowSync",
-        "NovaHaxD",
-        "CYPHER",
-        "Aki Zeta-5",
-        "Prime Function",
-        "Nexus-11",
-    ];
-    return vs.choose(&mut thread_rng()).unwrap().to_string();
-}
-
-fn random_hostile_name() -> String {
-    let vs: Vec<&str> = vec![
-        "adware-imp",
-        "maniabot",
-        "SpamSpyder",
-        "darknet-dragon",
-        "silent-strike",
-        "phantom_protocol",
-    ];
-    return vs.choose(&mut thread_rng()).unwrap().to_string();
 }
 
 #[derive(Clone, Copy)]
@@ -432,7 +153,7 @@ impl NetrunnerGame {
         let mut rng = thread_rng();
         let success_chance = 0.6;
         let roll_success: f32 = rng.gen();
-        if utils::roll_encounter(1.0 - success_chance) {
+        if roll_encounter(1.0 - success_chance) {
             // earn credits
             let reward_amount: i32 = (roll_success * difficulty * 4.5).ceil() as i32;
             self.player.credits += reward_amount;
@@ -463,7 +184,7 @@ impl NetrunnerGame {
         let mut rng = thread_rng();
         let roll_success: f32 = rng.gen();
         let success_chance = 0.8;
-        if utils::roll_encounter(1.0 - success_chance) {
+        if roll_encounter(1.0 - success_chance) {
             // minor good thing - search success
             let reward_amount: i32 = (roll_success * difficulty * 14.5).ceil() as i32;
             self.player.credits += reward_amount;
@@ -689,18 +410,6 @@ fn display_terminal(ui: &mut egui::Ui, terminal_lines: &Vec<String>) {
                 ui.label(entry);
             }
         });
-}
-
-fn internet_tasks(ui: &mut egui::Ui, current_value: &mut Tasks) {
-    ui.selectable_value(current_value, Tasks::Datamine, "Datamine");
-    ui.selectable_value(current_value, Tasks::Search, "Search around");
-    // ui.selectable_value(current_value, Tasks::Social, "Practice Socializing");
-}
-
-fn siprnet_tasks(ui: &mut egui::Ui, current_value: &mut Tasks) {
-    ui.selectable_value(current_value, Tasks::Datamine, "Datamine");
-    ui.selectable_value(current_value, Tasks::Search, "Search around");
-    // ui.selectable_value(current_value, Tasks::Social, "Social Engineering");
 }
 
 fn colored_label(label_txt: &str, current_val: i32, max_val: i32) -> egui::RichText {
