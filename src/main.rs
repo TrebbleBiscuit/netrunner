@@ -2,7 +2,7 @@
 
 use eframe::egui;
 use rand::seq::SliceRandom;
-use rand::{thread_rng, Rng};
+use rand::{random, thread_rng, Rng};
 use std::collections::HashMap;
 use std::fmt;
 use std::time::{Duration, Instant};
@@ -41,11 +41,31 @@ struct Contact {
     disposition: Disposition,
 }
 
+impl Contact {
+    fn new_from_level(level: i32) -> Self {
+        let total_skill_points = BASE_SKILL_POINTS * level;
+        let range: f32 = total_skill_points as f32 / 4.0;
+        let r_skill: i32 = ((total_skill_points as f32 / 2.0)
+            + ((random::<f32>() - 0.5) * 2.0 * range))
+            .round() as i32;
+        let health = 25 + (level * 5);
+        Self {
+            name: random_hostile_name(),
+            hp: CappedValue::new_health(health),
+            skills: Skills {
+                hacking: r_skill,
+                firewall: total_skill_points - r_skill,
+            },
+            disposition: Disposition::Hostile,
+        }
+    }
+}
+
 impl Default for Contact {
     fn default() -> Self {
         Self {
             name: random_hostile_name(),
-            hp: CappedValue::new(30, 30, CappedValueType::Health),
+            hp: CappedValue::new_health(30),
             skills: Skills::default(),
             disposition: Disposition::Hostile,
         }
@@ -123,10 +143,12 @@ struct Player {
     upgrades: HashMap<PlayerUpgradeType, PlayerUpgrade>,
 }
 
+const BASE_SKILL_POINTS: i32 = 10;
+
 impl Player {
     fn available_skill_points(&self) -> i32 {
-        // debug - for now, 14 points is the max
-        return 14 - self.skills.total_points();
+        // debug - for now, 12 points is the max
+        return BASE_SKILL_POINTS - self.skills.total_points();
     }
 }
 
@@ -151,8 +173,8 @@ impl Default for Player {
             stats: PlayerStats::default(),
             net_stats: net_stats,
             skills: Skills::default(),
-            hp: CappedValue::new(100, 100, CappedValueType::Health),
-            ram: CappedValue::new(50, 100, CappedValueType::Ram),
+            hp: CappedValue::new_health(100),
+            ram: CappedValue::new_ram(50, 100),
             credits: 100,
             xp: 0,
             upgrades: upgrades,
@@ -177,6 +199,22 @@ impl CappedValue {
             value: value,
             upper_limit: upper_limit,
             value_type: value_type,
+        }
+    }
+
+    fn new_health(value: i32) -> Self {
+        Self {
+            value: value,
+            upper_limit: value,
+            value_type: CappedValueType::Health,
+        }
+    }
+
+    fn new_ram(value: i32, upper_limit: i32) -> Self {
+        Self {
+            value: value,
+            upper_limit: value,
+            value_type: CappedValueType::Ram,
         }
     }
 
@@ -211,8 +249,8 @@ impl Skills {
 impl Default for Skills {
     fn default() -> Self {
         Self {
-            hacking: 5,
-            firewall: 5,
+            hacking: 4,
+            firewall: 4,
         }
     }
 }
@@ -226,8 +264,8 @@ enum Networks {
 impl Networks {
     fn difficulty(&self) -> f32 {
         match *self {
-            Networks::Internet => 1.5,
-            Networks::SIPRnet => 3.5,
+            Networks::Internet => 1.0,
+            Networks::SIPRnet => 3.0,
         }
     }
 }
@@ -320,8 +358,20 @@ impl NetrunnerGame {
         let mut dead_hostiles = vec![];
         let mut print_lines = vec![];
         for (index, contact) in self.contacts.iter_mut().enumerate() {
-            let dmg_to_hostile = (2 * self.player.skills.hacking) - contact.skills.firewall;
-            let dmg_to_player = 2 + contact.skills.hacking - self.player.skills.firewall;
+            // dmg to hostile
+            let min_dmg_to_hostile =
+                ((2 * self.player.skills.hacking) - contact.skills.firewall).max(0);
+            let max_dmg_to_hostile =
+                ((4 * self.player.skills.hacking) - (contact.skills.firewall / 2)).max(1);
+            let dmg_to_hostile =
+                rand::thread_rng().gen_range(min_dmg_to_hostile..max_dmg_to_hostile);
+            // dmg to player
+            let min_dmg_to_player =
+                (2 + contact.skills.hacking - self.player.skills.firewall).max(0);
+            let max_dmg_to_player =
+                (4 + contact.skills.hacking - (self.player.skills.firewall / 2)).max(1);
+            let dmg_to_player = rand::thread_rng().gen_range(min_dmg_to_player..max_dmg_to_player);
+            // actually apply damage
             self.player.hp.change_by(-dmg_to_player);
             contact.hp.change_by(-dmg_to_hostile);
             print_lines.push(format!(
@@ -380,20 +430,15 @@ impl NetrunnerGame {
     fn do_task_datamine(&mut self, difficulty: f32) {
         self.turn += 1;
         let mut rng = thread_rng();
-        // let flavor_name = match self.current_net {
-        //     Networks::Internet => "publically available databases",
-        //     Networks::SIPRnet => "classified databases",
-        // };
-        // self.terminal_print(format!("You search for {} to datamine.", { flavor_name }).as_str());
         let success_chance = 0.6;
         let roll_success: f32 = rng.gen();
         if utils::roll_encounter(1.0 - success_chance) {
             // earn credits
-            let reward_amount: i32 = (roll_success * difficulty * 3.5).ceil() as i32;
+            let reward_amount: i32 = (roll_success * difficulty * 4.5).ceil() as i32;
             self.player.credits += reward_amount;
             self.terminal_print(
                 format!(
-                    "({}) You found some interesting data worth {} credits",
+                    "({:.1}) You found some interesting data worth {} credits",
                     success_chance, reward_amount
                 )
                 .as_str(),
@@ -404,7 +449,7 @@ impl NetrunnerGame {
             self.player.ram.change_by(reward_amount);
             self.terminal_print(
                 format!(
-                    "({}) You don't find any new data, but regenerate {} RAM",
+                    "({:.1}) You don't find any new data, but regenerate {} RAM",
                     { 1.0 - success_chance },
                     reward_amount
                 )
@@ -416,40 +461,29 @@ impl NetrunnerGame {
     fn do_task_search(&mut self, difficulty: f32) {
         self.turn += 1;
         let mut rng = thread_rng();
-        let net_name = match self.current_net {
-            Networks::Internet => "the internet",
-            Networks::SIPRnet => "SIPRnet",
-        };
-        // self.terminal_print(
-        //     format!(
-        //         "You search {} for any interesting information you can find.",
-        //         { net_name }
-        //     )
-        //     .as_str(),
-        // );
-        //
         let roll_success: f32 = rng.gen();
         let success_chance = 0.8;
         if utils::roll_encounter(1.0 - success_chance) {
             // minor good thing - search success
-            let reward_amount: i32 = (roll_success * difficulty * 12.5).ceil() as i32;
+            let reward_amount: i32 = (roll_success * difficulty * 14.5).ceil() as i32;
             self.player.credits += reward_amount;
             self.terminal_print(
                 format!(
-                    "({}) You found some particularly interesting data worth {} credits",
+                    "({:.1}) You found some particularly interesting data worth {} credits",
                     success_chance, reward_amount
                 )
                 .as_str(),
             );
         } else {
             // bad thing - encounter
-            let new_contact = Contact::default();
+            let new_contact = Contact::new_from_level(difficulty.ceil() as i32);
             let contact_name = new_contact.name.clone();
             self.contacts.push(new_contact);
             self.terminal_print(
                 format!(
-                    "({}) You run into a nasty piece of malware - {}",
-                    success_chance, contact_name
+                    "({:.1}) You run into a nasty piece of malware - {}",
+                    { 1.0 - success_chance },
+                    contact_name
                 )
                 .as_str(),
             );
@@ -601,7 +635,7 @@ impl NetrunnerGame {
             .get(&self.current_net)
             .unwrap()
             .total_intel;
-        let per_level_cost = 100.0 * self.current_net.difficulty();
+        let per_level_cost = 200.0 * self.current_net.difficulty();
         let intel_level = (total_intel / per_level_cost).floor();
         let progress = (total_intel % per_level_cost) / per_level_cost;
         ui.horizontal(|ui| {
@@ -621,7 +655,7 @@ impl NetrunnerGame {
             ui.selectable_value(&mut self.current_task, Tasks::Search, "Search around");
         });
         ui.horizontal(|ui| {
-            if ui.button("Go").clicked() {
+            if ui.button("Do Task").clicked() {
                 self.do_task()
             }
             if ui.button("Enter Shop").clicked() {
