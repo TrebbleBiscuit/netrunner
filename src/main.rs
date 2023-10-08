@@ -380,21 +380,22 @@ impl NetrunnerGame {
     fn do_task_datamine(&mut self, difficulty: f32) {
         self.turn += 1;
         let mut rng = thread_rng();
-        let flavor_name = match self.current_net {
-            Networks::Internet => "publically available databases",
-            Networks::SIPRnet => "classified databases",
-        };
-        self.terminal_print(format!("You search for {} to datamine.", { flavor_name }).as_str());
+        // let flavor_name = match self.current_net {
+        //     Networks::Internet => "publically available databases",
+        //     Networks::SIPRnet => "classified databases",
+        // };
+        // self.terminal_print(format!("You search for {} to datamine.", { flavor_name }).as_str());
         let success_chance = 0.6;
         let roll_success: f32 = rng.gen();
         if utils::roll_encounter(1.0 - success_chance) {
             // earn credits
-            let reward_amount: i32 = (roll_success * difficulty * 2.5).ceil() as i32;
+            let reward_amount: i32 = (roll_success * difficulty * 3.5).ceil() as i32;
             self.player.credits += reward_amount;
             self.terminal_print(
-                format!("You found some interesting data worth {} credits", {
-                    reward_amount
-                })
+                format!(
+                    "({}) You found some interesting data worth {} credits",
+                    success_chance, reward_amount
+                )
                 .as_str(),
             );
         } else {
@@ -402,9 +403,11 @@ impl NetrunnerGame {
             let reward_amount: i32 = (roll_success * 12.5 + difficulty).ceil() as i32;
             self.player.ram.change_by(reward_amount);
             self.terminal_print(
-                format!("You don't find any new data, but regenerate {} RAM", {
+                format!(
+                    "({}) You don't find any new data, but regenerate {} RAM",
+                    { 1.0 - success_chance },
                     reward_amount
-                })
+                )
                 .as_str(),
             );
         }
@@ -417,24 +420,25 @@ impl NetrunnerGame {
             Networks::Internet => "the internet",
             Networks::SIPRnet => "SIPRnet",
         };
-        self.terminal_print(
-            format!(
-                "You search {} for any interesting information you can find.",
-                { net_name }
-            )
-            .as_str(),
-        );
+        // self.terminal_print(
+        //     format!(
+        //         "You search {} for any interesting information you can find.",
+        //         { net_name }
+        //     )
+        //     .as_str(),
+        // );
         //
         let roll_success: f32 = rng.gen();
         let success_chance = 0.8;
         if utils::roll_encounter(1.0 - success_chance) {
             // minor good thing - search success
-            let reward_amount: i32 = (roll_success * difficulty * 4.5).ceil() as i32;
+            let reward_amount: i32 = (roll_success * difficulty * 12.5).ceil() as i32;
             self.player.credits += reward_amount;
             self.terminal_print(
-                format!("You found some interesting data worth {} credits", {
-                    reward_amount
-                })
+                format!(
+                    "({}) You found some particularly interesting data worth {} credits",
+                    success_chance, reward_amount
+                )
                 .as_str(),
             );
         } else {
@@ -443,9 +447,10 @@ impl NetrunnerGame {
             let contact_name = new_contact.name.clone();
             self.contacts.push(new_contact);
             self.terminal_print(
-                format!("You run into a nasty piece of malware - {}", {
-                    contact_name
-                })
+                format!(
+                    "({}) You run into a nasty piece of malware - {}",
+                    success_chance, contact_name
+                )
                 .as_str(),
             );
             self.state = GameState::Combat;
@@ -588,6 +593,43 @@ impl NetrunnerGame {
             }
         }
     }
+
+    fn net_intel_bar(&mut self, ui: &mut egui::Ui) {
+        let total_intel = self
+            .player
+            .net_stats
+            .get(&self.current_net)
+            .unwrap()
+            .total_intel;
+        let per_level_cost = 100.0 * self.current_net.difficulty();
+        let intel_level = (total_intel / per_level_cost).floor();
+        let progress = (total_intel % per_level_cost) / per_level_cost;
+        ui.horizontal(|ui| {
+            ui.label(format!(
+                "Intel level: {} ({:.1}%)",
+                intel_level,
+                progress * 100.0
+            ));
+            ui.add(egui::ProgressBar::new(progress));
+        });
+    }
+
+    fn list_available_tasks(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            ui.label("Task: ");
+            ui.selectable_value(&mut self.current_task, Tasks::Datamine, "Datamine");
+            ui.selectable_value(&mut self.current_task, Tasks::Search, "Search around");
+        });
+        ui.horizontal(|ui| {
+            if ui.button("Go").clicked() {
+                self.do_task()
+            }
+            if ui.button("Enter Shop").clicked() {
+                // self.state = GameState::Interacting(InteractionType::BasicShop);
+                self.go_shopping();
+            }
+        });
+    }
 }
 
 fn ui_counter(ui: &mut egui::Ui, counter: &mut i32, can_add: bool) {
@@ -656,12 +698,6 @@ impl eframe::App for NetrunnerGame {
             .get_mut(&self.current_net)
             .unwrap()
             .total_intel += delta_time.as_secs_f32() * 1.0;
-        let total_intel = self
-            .player
-            .net_stats
-            .get(&self.current_net)
-            .unwrap()
-            .total_intel;
 
         // render GUI
         egui::TopBottomPanel::top("my_panel").show(ctx, |ui| {
@@ -714,35 +750,10 @@ impl eframe::App for NetrunnerGame {
                     ui.label("You are logged in to the US DoD's classified network.")
                 }
             };
-            // network info
-            let per_level_cost = 100.0;
-            let intel_level = (total_intel / per_level_cost).floor();
-            ui.horizontal(|ui| {
-                ui.label(format!("Intel level: {:.2}", intel_level));
-                ui.add(egui::ProgressBar::new(
-                    (total_intel % per_level_cost) / per_level_cost,
-                ));
-            });
+            self.net_intel_bar(ui);
             ui.separator();
             // list available tasks
-            ui.horizontal(|ui| {
-                ui.label("Task: ");
-                match self.current_net {
-                    Networks::Internet => internet_tasks(ui, &mut self.current_task),
-                    Networks::SIPRnet => {
-                        siprnet_tasks(ui, &mut self.current_task);
-                    }
-                }
-            });
-            ui.horizontal(|ui| {
-                if ui.button("Go").clicked() {
-                    self.do_task()
-                }
-                if ui.button("Enter Shop").clicked() {
-                    // self.state = GameState::Interacting(InteractionType::BasicShop);
-                    self.go_shopping();
-                }
-            });
+            self.list_available_tasks(ui);
 
             display_terminal(ui, &self.terminal_lines);
         });
