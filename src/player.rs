@@ -1,16 +1,21 @@
-use std::collections::HashMap;
-
 use rand::{seq::SliceRandom, thread_rng};
+use std::collections::HashMap;
 
 use crate::pieces::{CappedValue, Networks, Skills, BASE_SKILL_POINTS};
 
 pub struct PlayerStats {
     pub kills: u32,
+    pub datamine_success: u32,
+    pub search_success: u32,
 }
 
 impl Default for PlayerStats {
     fn default() -> Self {
-        Self { kills: 0 }
+        Self {
+            kills: 0,
+            datamine_success: 0,
+            search_success: 0,
+        }
     }
 }
 
@@ -24,36 +29,38 @@ impl Default for NetStats {
     }
 }
 
-#[derive(PartialEq, Eq, Hash)]
+#[derive(PartialEq, Eq, Hash, Clone)]
 pub enum PlayerUpgradeType {
     HPMaxUp,
+    SecurityUp,
 }
 
 impl PlayerUpgradeType {
     pub fn name(&self) -> String {
         match *self {
             PlayerUpgradeType::HPMaxUp => "HP Max +".to_string(),
+            PlayerUpgradeType::SecurityUp => "Sec Max +".to_string(),
         }
     }
 }
 
 pub struct PlayerUpgrade {
-    upgrade_type: PlayerUpgradeType,
+    pub upgrade_type: PlayerUpgradeType,
     pub level: u32,
     base_cost: u32,
     cost_per_level: u32,
+    pub available: bool,
 }
 
 impl PlayerUpgrade {
     pub fn cost(&self) -> u32 {
         return self.base_cost + (self.level * self.cost_per_level);
     }
+}
 
-    pub fn upgrade_type(&self) -> PlayerUpgradeType {
-        match self.upgrade_type {
-            PlayerUpgradeType::HPMaxUp => PlayerUpgradeType::HPMaxUp,
-        }
-    }
+#[derive(Debug, PartialEq, Eq)]
+pub enum PlayerFlag {
+    DiscoveredShopBasic,
 }
 
 pub struct Player {
@@ -66,12 +73,27 @@ pub struct Player {
     pub credits: i32,
     pub xp: i32,
     pub upgrades: HashMap<PlayerUpgradeType, PlayerUpgrade>,
+    pub flags: Vec<PlayerFlag>,
 }
 
 impl Player {
     pub fn available_skill_points(&self) -> i32 {
         // debug - for now, 12 points is the max
         return BASE_SKILL_POINTS - self.skills.total_points();
+    }
+
+    pub fn enable_flag(&mut self, flag: PlayerFlag) {
+        if !self.flags.contains(&flag) {
+            self.flags.push(flag);
+        }
+    }
+
+    pub fn disable_flag(&mut self, flag: &PlayerFlag) {
+        self.flags.retain(|f| f != flag);
+    }
+
+    pub fn has_flag(&self, flag: &PlayerFlag) -> bool {
+        self.flags.contains(flag)
     }
 }
 
@@ -85,6 +107,17 @@ impl Default for Player {
                 level: 0,
                 cost_per_level: 50,
                 base_cost: 100,
+                available: true,
+            },
+        );
+        upgrades.insert(
+            PlayerUpgradeType::SecurityUp,
+            PlayerUpgrade {
+                upgrade_type: PlayerUpgradeType::SecurityUp,
+                level: 0,
+                cost_per_level: 300,
+                base_cost: 150,
+                available: false,
             },
         );
         let mut net_stats = HashMap::new();
@@ -100,6 +133,7 @@ impl Default for Player {
             credits: 100,
             xp: 0,
             upgrades: upgrades,
+            flags: vec![],
         }
     }
 }

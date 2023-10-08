@@ -9,7 +9,7 @@ mod player;
 mod utils;
 
 use pieces::{Contact, Networks};
-use player::{Player, PlayerUpgradeType};
+use player::{Player, PlayerFlag, PlayerUpgradeType};
 use utils::roll_encounter;
 
 fn main() -> Result<(), eframe::Error> {
@@ -154,7 +154,8 @@ impl NetrunnerGame {
         let success_chance = 0.6;
         let roll_success: f32 = rng.gen();
         if roll_encounter(1.0 - success_chance) {
-            // earn credits
+            // success - earn credits
+            self.player.stats.datamine_success += 1;
             let reward_amount: i32 = (roll_success * difficulty * 4.5).ceil() as i32;
             self.player.credits += reward_amount;
             self.terminal_print(
@@ -165,7 +166,7 @@ impl NetrunnerGame {
                 .as_str(),
             );
         } else {
-            // regen ram
+            // "fail" - regen ram
             let reward_amount: i32 = (roll_success * 12.5 + difficulty).ceil() as i32;
             self.player.ram.change_by(reward_amount);
             self.terminal_print(
@@ -183,9 +184,30 @@ impl NetrunnerGame {
         self.turn += 1;
         let mut rng = thread_rng();
         let roll_success: f32 = rng.gen();
+
+        // first-time encounters
+        match self.current_net {
+            Networks::Internet => {
+                if !self.player.has_flag(&PlayerFlag::DiscoveredShopBasic)
+                    && self.player.credits >= 100
+                {
+                    if roll_encounter(0.2) {
+                        // stumble across the shop
+                        self.terminal_print(
+                        "You stumble across some sort of virtual server for secure transations.",
+                    );
+                        self.go_shopping();
+                        return;
+                    }
+                }
+            }
+            Networks::SIPRnet => {}
+        }
+
         let success_chance = 0.8;
         if roll_encounter(1.0 - success_chance) {
             // minor good thing - search success
+            self.player.stats.search_success += 1;
             let reward_amount: i32 = (roll_success * difficulty * 14.5).ceil() as i32;
             self.player.credits += reward_amount;
             self.terminal_print(
@@ -317,9 +339,18 @@ impl NetrunnerGame {
     }
 
     fn shop_for_upgrades(&mut self, ui: &mut egui::Ui) {
+        if self.player.flags.contains(&PlayerFlag::DiscoveredShopBasic) {
+            ui.label("New here? Don't recognize you. c Let's do biz.");
+        };
         let mut available_upgrades = vec![];
         for (_, upgrade) in self.player.upgrades.iter() {
-            available_upgrades.push((upgrade.upgrade_type(), upgrade.level, upgrade.cost()))
+            if upgrade.available {
+                available_upgrades.push((
+                    upgrade.upgrade_type.clone(),
+                    upgrade.level,
+                    upgrade.cost(),
+                ))
+            }
         }
         for (up_type, up_lvl, up_cost) in available_upgrades.iter() {
             ui.horizontal(|ui| {
@@ -346,6 +377,7 @@ impl NetrunnerGame {
                 self.player.hp.upper_limit += 50;
                 self.player.hp.value += 50
             }
+            PlayerUpgradeType::SecurityUp => todo!(),
         }
     }
 
@@ -379,10 +411,12 @@ impl NetrunnerGame {
             if ui.button("Do Task").clicked() {
                 self.do_task()
             }
-            if ui.button("Enter Shop").clicked() {
-                // self.state = GameState::Interacting(InteractionType::BasicShop);
-                self.go_shopping();
-            }
+            if self.player.flags.contains(&PlayerFlag::DiscoveredShopBasic) {
+                if ui.button("Enter Shop").clicked() {
+                    // self.state = GameState::Interacting(InteractionType::BasicShop);
+                    self.go_shopping();
+                }
+            };
         });
     }
 }
@@ -471,6 +505,7 @@ impl eframe::App for NetrunnerGame {
                     }
                     if ui.button("Exit Shop").clicked() {
                         self.state = GameState::FreeRoam;
+                        self.player.enable_flag(PlayerFlag::DiscoveredShopBasic)
                     };
                 });
             }
