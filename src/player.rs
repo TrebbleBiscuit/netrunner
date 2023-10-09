@@ -1,6 +1,7 @@
 use rand::{seq::SliceRandom, thread_rng};
 use std::collections::HashMap;
 
+use crate::buffs::BuffContainer;
 use crate::pieces::{CappedValue, Networks, Skills, BASE_SKILL_POINTS};
 
 pub struct PlayerStats {
@@ -74,6 +75,7 @@ pub struct Player {
     pub xp: i32,
     pub upgrades: HashMap<PlayerUpgradeType, PlayerUpgrade>,
     pub flags: Vec<PlayerFlag>,
+    pub buffs: BuffContainer,
 }
 
 impl Player {
@@ -130,10 +132,11 @@ impl Default for Player {
             skills: Skills::default(),
             hp: CappedValue::new_health(100),
             ram: CappedValue::new_ram(50, 100),
-            credits: 100,
+            credits: 0,
             xp: 0,
             upgrades: upgrades,
             flags: vec![],
+            buffs: BuffContainer::new(),
         }
     }
 }

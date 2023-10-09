@@ -5,6 +5,7 @@ use egui::{Color32, RichText};
 use rand::{thread_rng, Rng};
 use std::time::{Duration, Instant};
 
+mod buffs;
 mod pieces;
 mod player;
 mod utils;
@@ -19,7 +20,8 @@ const MAX_WAIT_BETWEEN_FRAMES: Duration = Duration::from_millis(200); // 200ms =
 fn main() -> Result<(), eframe::Error> {
     // env_logger::init(); // Log to stderr (if you run with `RUST_LOG=debug`).
     let options = eframe::NativeOptions {
-        initial_window_size: Some(egui::vec2(450.0, 350.0)),
+        initial_window_size: Some(egui::vec2(450.0, 400.0)),
+        always_on_top: true,
         ..Default::default()
     };
     eframe::run_native(
@@ -37,13 +39,12 @@ enum Tasks {
 }
 
 impl Tasks {
-    fn description(&self) -> String {
+    fn description(&self) -> RichText {
         match *self {
-            Tasks::Search => {
-                "Search for valuable data but risk attention from hostile daemons and runners"
-                    .to_owned()
+            Tasks::Search => RichText::new("High risk, ++ Credits, ???").color(Color32::DARK_GRAY),
+            Tasks::Datamine => {
+                RichText::new("Low risk, + Credits, + Ram").color(Color32::DARK_GRAY)
             }
-            Tasks::Datamine => "Low risk data mining, regen RAM".to_owned(),
         }
     }
 }
@@ -91,8 +92,12 @@ impl Default for NetrunnerGame {
 }
 
 impl NetrunnerGame {
-    fn combat_attack(&mut self) {
+    fn do_turn(&mut self) {
         self.turn += 1;
+        self.player.buffs.do_turn();
+    }
+
+    fn combat_attack(&mut self) {
         let mut dead_hostiles = vec![];
         let mut print_lines = vec![];
         for (index, contact) in self.contacts.iter_mut().enumerate() {
@@ -103,6 +108,13 @@ impl NetrunnerGame {
                 ((4 * self.player.skills.hacking) - (contact.skills.security / 2)).max(1);
             let dmg_to_hostile =
                 rand::thread_rng().gen_range(min_dmg_to_hostile..max_dmg_to_hostile);
+            // buff dmg
+            let buff_dmg = self.player.buffs.get_buff_dmg(dmg_to_hostile);
+            let buff_text = if buff_dmg > 0 {
+                format!(" + {}", buff_dmg)
+            } else {
+                String::new()
+            };
             // dmg to player
             let min_dmg_to_player =
                 (2 + contact.skills.hacking - self.player.skills.security).max(0);
@@ -111,10 +123,10 @@ impl NetrunnerGame {
             let dmg_to_player = rand::thread_rng().gen_range(min_dmg_to_player..max_dmg_to_player);
             // actually apply damage
             self.player.hp.change_by(-dmg_to_player);
-            contact.hp.change_by(-dmg_to_hostile);
+            contact.hp.change_by(-(dmg_to_hostile + buff_dmg));
             print_lines.push(format!(
-                "You deal {} damage to {}.",
-                dmg_to_hostile, contact.name
+                "You deal {}{} damage to {}.",
+                dmg_to_hostile, buff_text, contact.name
             ));
             print_lines.push(format!(
                 "You take {} damage from {}.",
@@ -135,6 +147,11 @@ impl NetrunnerGame {
         for line in &print_lines {
             self.terminal_print(line);
         }
+    }
+
+    fn ability_overclock(&mut self) {
+        self.terminal_print("You overclock your systems, empowering your next attack.");
+        self.player.buffs.add_buff(buffs::BuffType::Overclock, 1);
     }
 
     fn do_task(&mut self) {
@@ -166,7 +183,7 @@ impl NetrunnerGame {
     }
 
     fn do_task_datamine(&mut self, difficulty: f32) {
-        self.turn += 1;
+        self.do_turn();
         let mut rng = thread_rng();
         let success_chance = 0.6;
         let roll_success: f32 = rng.gen();
@@ -184,7 +201,7 @@ impl NetrunnerGame {
             );
         } else {
             // "fail" - regen ram
-            let reward_amount: i32 = (roll_success * 12.5 + difficulty).ceil() as i32;
+            let reward_amount: i32 = (roll_success * 14.5 + difficulty).ceil() as i32;
             self.player.ram.change_by(reward_amount);
             self.terminal_print(
                 format!(
@@ -198,7 +215,7 @@ impl NetrunnerGame {
     }
 
     fn do_task_search(&mut self, difficulty: f32) {
-        self.turn += 1;
+        self.do_turn();
         let mut rng = thread_rng();
         let roll_success: f32 = rng.gen();
 
@@ -364,16 +381,37 @@ impl NetrunnerGame {
             // ui.horizontal(|ui| {
             ui.heading(RichText::new("Threat Detected").color(Color32::from_rgb(200, 100, 0)));
             ui.label(format!("Contact: {}", contact.name));
-            ui.label(format!(
-                "HP: {}/{}",
-                contact.hp.value, contact.hp.upper_limit
+            ui.label(colored_label(
+                "HP",
+                contact.hp.value,
+                contact.hp.upper_limit,
             ));
             ui.label(format!("Disposition: {}", contact.disposition));
             // });
         }
         ui.horizontal(|ui| {
-            if ui.button("Launch Offensive Hack").clicked() {
-                self.combat_attack();
+            let attack_cost = 4;
+            if ui.button("Launch Hack").clicked() {
+                if self.player.ram.value >= attack_cost {
+                    self.player.ram.change_by(-attack_cost);
+                    self.combat_attack();
+                    self.do_turn();
+                } else {
+                    self.terminal_print(
+                        format!("You need {} RAM to use that ability.", attack_cost).as_str(),
+                    )
+                }
+            }
+            let overclock_cost = 10;
+            if ui.button("Overclock Systems").clicked() {
+                if self.player.ram.value >= overclock_cost {
+                    self.player.ram.change_by(-overclock_cost);
+                    self.ability_overclock();
+                } else {
+                    self.terminal_print(
+                        format!("You need {} RAM to use that ability.", overclock_cost).as_str(),
+                    )
+                }
             }
             if ui
                 .button(RichText::new("Escape Combat").color(Color32::GRAY))
@@ -387,7 +425,7 @@ impl NetrunnerGame {
     }
 
     fn shop_for_upgrades(&mut self, ui: &mut egui::Ui) {
-        if self.player.flags.contains(&PlayerFlag::DiscoveredShopBasic) {
+        if self.player.has_flag(&PlayerFlag::DiscoveredShopBasic) {
             ui.label("New here? Don't recognize you. c Let's do biz.");
         };
         let mut available_upgrades = vec![];
@@ -461,7 +499,7 @@ impl NetrunnerGame {
             if ui.button("Do Task").clicked() {
                 self.do_task()
             }
-            if self.player.flags.contains(&PlayerFlag::DiscoveredShopBasic) {
+            if self.player.has_flag(&PlayerFlag::DiscoveredShopBasic) {
                 if ui
                     .button(RichText::new("Enter Shop").color(Color32::GRAY))
                     .clicked()
