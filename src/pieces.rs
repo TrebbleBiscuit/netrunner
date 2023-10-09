@@ -47,7 +47,7 @@ impl Contact {
             hp: CappedValue::new_health(health),
             skills: Skills {
                 hacking: r_skill,
-                firewall: total_skill_points - r_skill,
+                security: total_skill_points - r_skill,
             },
             disposition: Disposition::Hostile,
         }
@@ -112,12 +112,12 @@ impl CappedValue {
 
 pub struct Skills {
     pub hacking: i32,
-    pub firewall: i32,
+    pub security: i32,
 }
 
 impl Skills {
     pub fn total_points(&self) -> i32 {
-        return self.hacking + self.firewall;
+        return self.hacking + self.security;
     }
 }
 
@@ -125,7 +125,7 @@ impl Default for Skills {
     fn default() -> Self {
         Self {
             hacking: 4,
-            firewall: 4,
+            security: 4,
         }
     }
 }

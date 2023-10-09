@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
 
 use eframe::egui;
+use egui::{Color32, RichText};
 use rand::{thread_rng, Rng};
 use std::time::{Duration, Instant};
 
@@ -32,12 +33,25 @@ enum Tasks {
               // Social,   // level up social skill?
 }
 
-#[derive(Clone, Copy)]
+impl Tasks {
+    fn description(&self) -> String {
+        match *self {
+            Tasks::Search => {
+                "Search for valuable data but risk attention from hostile daemons and runners"
+                    .to_owned()
+            }
+            Tasks::Datamine => "Low risk data mining, regen RAM".to_owned(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq)]
 enum InteractionType {
     BasicShop,
     AdvancedShop,
 }
 
+#[derive(PartialEq)]
 enum GameState {
     FreeRoam,
     Combat,
@@ -81,16 +95,16 @@ impl NetrunnerGame {
         for (index, contact) in self.contacts.iter_mut().enumerate() {
             // dmg to hostile
             let min_dmg_to_hostile =
-                ((2 * self.player.skills.hacking) - contact.skills.firewall).max(0);
+                ((2 * self.player.skills.hacking) - contact.skills.security).max(0);
             let max_dmg_to_hostile =
-                ((4 * self.player.skills.hacking) - (contact.skills.firewall / 2)).max(1);
+                ((4 * self.player.skills.hacking) - (contact.skills.security / 2)).max(1);
             let dmg_to_hostile =
                 rand::thread_rng().gen_range(min_dmg_to_hostile..max_dmg_to_hostile);
             // dmg to player
             let min_dmg_to_player =
-                (2 + contact.skills.hacking - self.player.skills.firewall).max(0);
+                (2 + contact.skills.hacking - self.player.skills.security).max(0);
             let max_dmg_to_player =
-                (4 + contact.skills.hacking - (self.player.skills.firewall / 2)).max(1);
+                (4 + contact.skills.hacking - (self.player.skills.security / 2)).max(1);
             let dmg_to_player = rand::thread_rng().gen_range(min_dmg_to_player..max_dmg_to_player);
             // actually apply damage
             self.player.hp.change_by(-dmg_to_player);
@@ -267,23 +281,40 @@ impl NetrunnerGame {
             .show_header(ui, |ui| {
                 ui.label("Player Stats");
                 if pts > 0 {
-                    ui.label(format!("- {} points available", pts));
+                    // ui.label(format!("- {} points available", pts));
+                    ui.label(
+                        RichText::new(format!("- {} point{} available!", pts, {
+                            if pts > 1 {
+                                "s"
+                            } else {
+                                ""
+                            }
+                        }))
+                        .color(egui::Color32::LIGHT_GRAY),
+                    );
                 }
             })
             .body(|ui| {
-                let can_add_skills: bool = pts > 0;
-                egui::Grid::new("some_unique_id").show(ui, |ui| {
-                    // row: atk/def stats
-                    ui.horizontal(|ui| {
-                        ui.label("ATK: ");
-                        ui_counter(ui, &mut self.player.skills.hacking, can_add_skills);
+                let enabled = match self.state {
+                    GameState::FreeRoam => true,
+                    _ => false,
+                };
+                ui.add_enabled_ui(enabled, |ui| {
+                    egui::Grid::new("some_unique_id").show(ui, |ui| {
+                        // row: atk/def stats
+                        ui.horizontal(|ui| {
+                            ui.label("Hacking: ")
+                                .on_hover_text("Increases attack damage");
+                            ui_counter(ui, &mut self.player.skills.hacking);
+                        });
+                        ui.horizontal(|ui| {
+                            ui.separator();
+                            ui.label("Security: ")
+                                .on_hover_text("Mitigates enemy hacks");
+                            ui_counter(ui, &mut self.player.skills.security);
+                        });
+                        ui.end_row();
                     });
-                    ui.horizontal(|ui| {
-                        ui.separator();
-                        ui.label("DEF: ");
-                        ui_counter(ui, &mut self.player.skills.firewall, can_add_skills);
-                    });
-                    ui.end_row();
                 });
             });
 
@@ -292,34 +323,43 @@ impl NetrunnerGame {
     }
 
     fn list_available_networks(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal(|ui| {
-            ui.label("Network: ");
-            if ui
-                .add(egui::RadioButton::new(
-                    self.current_net == Networks::Internet,
-                    "Internet",
-                ))
-                .clicked()
-            {
-                self.current_net = Networks::Internet
-            }
-            if ui
-                .add(egui::RadioButton::new(
-                    self.current_net == Networks::SIPRnet,
-                    "SIPRnet",
-                ))
-                .clicked()
-            {
-                self.current_net = Networks::SIPRnet
-            }
-            // ui.radio_value(&mut self.current_net, Networks::Internet, "Internet");
-            // ui.radio_value(&mut self.current_net, Networks::SIPRnet, "SIPRnet");
+        // you can only change networks in free roam
+        let enabled = match self.state {
+            GameState::FreeRoam => true,
+            _ => false,
+        };
+        ui.add_enabled_ui(enabled, |ui| {
+            ui.horizontal(|ui| {
+                ui.label("Network: ");
+                if ui
+                    .add(egui::RadioButton::new(
+                        self.current_net == Networks::Internet,
+                        "Internet",
+                    ))
+                    .clicked()
+                {
+                    self.current_net = Networks::Internet
+                }
+                if ui
+                    .add(egui::RadioButton::new(
+                        self.current_net == Networks::SIPRnet,
+                        "SIPRnet",
+                    ))
+                    .clicked()
+                {
+                    self.current_net = Networks::SIPRnet
+                    // TODO: first time login
+                }
+                // ui.radio_value(&mut self.current_net, Networks::Internet, "Internet");
+                // ui.radio_value(&mut self.current_net, Networks::SIPRnet, "SIPRnet");
+            });
         });
     }
 
     fn combat_window(&mut self, ui: &mut egui::Ui) {
         for contact in &self.contacts {
             // ui.horizontal(|ui| {
+            ui.heading(RichText::new("Threat Detected").color(Color32::from_rgb(200, 100, 0)));
             ui.label(format!("Contact: {}", contact.name));
             ui.label(format!(
                 "HP: {}/{}",
@@ -328,14 +368,19 @@ impl NetrunnerGame {
             ui.label(format!("Disposition: {}", contact.disposition));
             // });
         }
-        if ui.button("Launch Offensive Hack").clicked() {
-            self.combat_attack();
-        }
-        if ui.button("Exit Combat").clicked() {
-            self.state = GameState::FreeRoam;
-            self.contacts.clear();
-            self.terminal_print("You escape from combat.")
-        }
+        ui.horizontal(|ui| {
+            if ui.button("Launch Offensive Hack").clicked() {
+                self.combat_attack();
+            }
+            if ui
+                .button(RichText::new("Escape Combat").color(Color32::GRAY))
+                .clicked()
+            {
+                self.state = GameState::FreeRoam;
+                self.contacts.clear();
+                self.terminal_print("You escape from combat.")
+            }
+        });
     }
 
     fn shop_for_upgrades(&mut self, ui: &mut egui::Ui) {
@@ -402,17 +447,22 @@ impl NetrunnerGame {
     }
 
     fn list_available_tasks(&mut self, ui: &mut egui::Ui) {
+        ui.heading("Task selection");
         ui.horizontal(|ui| {
             ui.label("Task: ");
             ui.selectable_value(&mut self.current_task, Tasks::Datamine, "Datamine");
             ui.selectable_value(&mut self.current_task, Tasks::Search, "Search around");
         });
+        ui.label(self.current_task.description());
         ui.horizontal(|ui| {
             if ui.button("Do Task").clicked() {
                 self.do_task()
             }
             if self.player.flags.contains(&PlayerFlag::DiscoveredShopBasic) {
-                if ui.button("Enter Shop").clicked() {
+                if ui
+                    .button(RichText::new("Enter Shop").color(Color32::GRAY))
+                    .clicked()
+                {
                     // self.state = GameState::Interacting(InteractionType::BasicShop);
                     self.go_shopping();
                 }
@@ -421,17 +471,15 @@ impl NetrunnerGame {
     }
 }
 
-fn ui_counter(ui: &mut egui::Ui, counter: &mut i32, can_add: bool) {
+fn ui_counter(ui: &mut egui::Ui, counter: &mut i32) {
     // Put the buttons and label on the same row:
     ui.horizontal(|ui| {
         if ui.button("-").clicked() {
             *counter -= 1;
         }
         ui.label(counter.to_string());
-        if can_add {
-            if ui.button("+").clicked() {
-                *counter += 1;
-            }
+        if ui.button("+").clicked() {
+            *counter += 1;
         }
     });
 }
@@ -446,7 +494,7 @@ fn display_terminal(ui: &mut egui::Ui, terminal_lines: &Vec<String>) {
         });
 }
 
-fn colored_label(label_txt: &str, current_val: i32, max_val: i32) -> egui::RichText {
+fn colored_label(label_txt: &str, current_val: i32, max_val: i32) -> RichText {
     // if hp < 50%, start tinting it red
     let brightness = 160;
     let hp_ratio = current_val as f32 / max_val as f32;
@@ -457,7 +505,7 @@ fn colored_label(label_txt: &str, current_val: i32, max_val: i32) -> egui::RichT
     } else {
         egui::Color32::from_rgb(lighter_tint, darker_tint, darker_tint)
     };
-    egui::RichText::new(format!("{}: {} / {}", label_txt, current_val, max_val)).color(label_color)
+    RichText::new(format!("{}: {} / {}", label_txt, current_val, max_val)).color(label_color)
 }
 
 impl eframe::App for NetrunnerGame {
@@ -477,39 +525,17 @@ impl eframe::App for NetrunnerGame {
             .total_intel += delta_time.as_secs_f32() * 1.0;
 
         // render GUI
+        let browse_flavor_txt = match self.state {
+            GameState::Combat => "Engaged in combat",
+            _ => "Cruising the net",
+        };
         egui::TopBottomPanel::top("my_panel").show(ctx, |ui| {
             ui.heading(format!(
-                "welcome to the net - latency: {} ms",
+                "{} - latency: {} ms",
+                browse_flavor_txt,
                 delta_time.as_millis()
             ));
         });
-        match self.state {
-            GameState::FreeRoam => {}
-            GameState::Combat => {
-                egui::Window::new("Combat Window").show(ctx, |ui| {
-                    self.combat_window(ui);
-                });
-            }
-            GameState::Interacting(int_type) => {
-                egui::Window::new("Interaction Window").show(ctx, |ui| {
-                    match int_type {
-                        InteractionType::BasicShop => {
-                            ui.heading("welcome to the script kiddie shop");
-                            self.shop_for_upgrades(ui);
-                        }
-
-                        InteractionType::AdvancedShop => {
-                            ui.heading("welcome to the elite hacker shop");
-                            self.shop_for_upgrades(ui);
-                        }
-                    }
-                    if ui.button("Exit Shop").clicked() {
-                        self.state = GameState::FreeRoam;
-                        self.player.enable_flag(PlayerFlag::DiscoveredShopBasic)
-                    };
-                });
-            }
-        }
 
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.horizontal(|ui| {
@@ -530,9 +556,30 @@ impl eframe::App for NetrunnerGame {
             };
             self.net_intel_bar(ui);
             ui.separator();
-            // list available tasks
-            self.list_available_tasks(ui);
+            match self.state {
+                GameState::FreeRoam => self.list_available_tasks(ui),
+                GameState::Combat => self.combat_window(ui),
+                GameState::Interacting(int_type) => match int_type {
+                    InteractionType::BasicShop => {
+                        ui.heading("welcome to the script kiddie shop");
+                        self.shop_for_upgrades(ui);
+                        if ui.button("Exit Shop").clicked() {
+                            self.state = GameState::FreeRoam;
+                            self.player.enable_flag(PlayerFlag::DiscoveredShopBasic)
+                        };
+                    }
 
+                    InteractionType::AdvancedShop => {
+                        ui.heading("welcome to the elite hacker shop");
+                        self.shop_for_upgrades(ui);
+                        if ui.button("Exit Shop").clicked() {
+                            self.state = GameState::FreeRoam;
+                            self.player.enable_flag(PlayerFlag::DiscoveredShopBasic)
+                        };
+                    }
+                },
+            }
+            ui.separator();
             display_terminal(ui, &self.terminal_lines);
         });
     }
