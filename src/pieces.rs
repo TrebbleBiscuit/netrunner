@@ -15,6 +15,19 @@ fn random_hostile_name() -> String {
     return vs.choose(&mut thread_rng()).unwrap().to_string();
 }
 
+fn random_gov_hostile_name() -> String {
+    let vs: Vec<&str> = vec![
+        "VigilanceCore",
+        "PulseDefender",
+        "AegisProtocol",
+        "CyberSam",
+        "ApexSentinel",
+        "EtherealVigil",
+        "QuantumSafeguard",
+    ];
+    return vs.choose(&mut thread_rng()).unwrap().to_string();
+}
+
 #[derive(Debug)]
 pub enum Disposition {
     Neutral,
@@ -35,15 +48,19 @@ pub struct Contact {
 }
 
 impl Contact {
-    pub fn new_from_level(level: i32) -> Self {
+    pub fn new(level: i32, net: &Networks) -> Self {
         let total_skill_points = BASE_SKILL_POINTS * level;
         let range: f32 = total_skill_points as f32 / 4.0;
         let r_skill: i32 = ((total_skill_points as f32 / 2.0)
             + ((random::<f32>() - 0.5) * 2.0 * range))
             .round() as i32;
         let health = 25 + (level * 5);
+        let name = match net {
+            Networks::Internet => random_hostile_name(),
+            Networks::SIPRnet => random_gov_hostile_name(),
+        };
         Self {
-            name: random_hostile_name(),
+            name: name,
             hp: CappedValue::new_health(health),
             skills: Skills {
                 hacking: r_skill,

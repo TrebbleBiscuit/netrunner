@@ -13,6 +13,9 @@ use pieces::{Contact, Networks};
 use player::{Player, PlayerFlag, PlayerUpgradeType};
 use utils::roll_encounter;
 
+// update at this framerate when there is no user input
+const MAX_WAIT_BETWEEN_FRAMES: Duration = Duration::from_millis(200); // 200ms = 5 fps
+
 fn main() -> Result<(), eframe::Error> {
     // env_logger::init(); // Log to stderr (if you run with `RUST_LOG=debug`).
     let options = eframe::NativeOptions {
@@ -233,7 +236,7 @@ impl NetrunnerGame {
             );
         } else {
             // bad thing - encounter
-            let new_contact = Contact::new_from_level(difficulty.ceil() as i32);
+            let new_contact = Contact::new(difficulty.ceil() as i32, &self.current_net);
             let contact_name = new_contact.name.clone();
             self.contacts.push(new_contact);
             self.terminal_print(
@@ -515,7 +518,7 @@ impl eframe::App for NetrunnerGame {
         let delta_time = current_time.duration_since(self.last_frame_time);
         self.last_frame_time = current_time;
         // 1 fps minimum even if unfocused
-        ctx.request_repaint_after(Duration::from_secs(1));
+        ctx.request_repaint_after(MAX_WAIT_BETWEEN_FRAMES);
 
         // adjust intel level over time
         self.player
