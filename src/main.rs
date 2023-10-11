@@ -1,11 +1,13 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
 
+use conversation::Conversation;
 use eframe::egui;
 use egui::{Color32, RichText};
 use rand::{thread_rng, Rng};
 use std::time::{Duration, Instant};
 
 mod buffs;
+mod conversation;
 mod pieces;
 mod player;
 mod utils;
@@ -52,41 +54,42 @@ impl Tasks {
 #[derive(Clone, Copy, PartialEq)]
 enum InteractionType {
     BasicShop,
-    AdvancedShop,
 }
 
-#[derive(PartialEq)]
-enum GameState {
+/// An activity describes what the player is currently doing
+enum Activity {
     FreeRoam,
-    Combat,
+    Combat(Vec<Contact>),
     Interacting(InteractionType),
+    Conversing(Conversation),
 }
 
 struct NetrunnerGame {
+    // game objects
     player: Player,
-    state: GameState,
     terminal_lines: Vec<String>,
+    // enums
+    activity: Activity,
     current_net: Networks,
     current_task: Tasks,
+    // values
     turn: i32,
     last_frame_time: Instant,
-    contacts: Vec<Contact>,
 }
 
 impl Default for NetrunnerGame {
     fn default() -> Self {
         Self {
             player: Player::default(),
-            state: GameState::FreeRoam,
             terminal_lines: vec![
                 "welcome to cybergame".to_string(),
                 "strap in, choomba".to_string(),
             ],
+            activity: Activity::FreeRoam,
             current_net: Networks::Internet,
             current_task: Tasks::Datamine,
             turn: 1,
             last_frame_time: Instant::now(),
-            contacts: Vec::new(),
         }
     }
 }
@@ -100,52 +103,57 @@ impl NetrunnerGame {
     fn combat_attack(&mut self) {
         let mut dead_hostiles = vec![];
         let mut print_lines = vec![];
-        for (index, contact) in self.contacts.iter_mut().enumerate() {
-            // dmg to hostile
-            let min_dmg_to_hostile =
-                ((2 * self.player.skills.hacking) - contact.skills.security).max(0);
-            let max_dmg_to_hostile =
-                ((4 * self.player.skills.hacking) - (contact.skills.security / 2)).max(1);
-            let dmg_to_hostile =
-                rand::thread_rng().gen_range(min_dmg_to_hostile..max_dmg_to_hostile);
-            // buff dmg
-            let buff_dmg = self.player.buffs.get_buff_dmg(dmg_to_hostile);
-            let buff_text = if buff_dmg > 0 {
-                format!(" + {}", buff_dmg)
-            } else {
-                String::new()
-            };
-            // dmg to player
-            let min_dmg_to_player =
-                (2 + contact.skills.hacking - self.player.skills.security).max(0);
-            let max_dmg_to_player =
-                (4 + contact.skills.hacking - (self.player.skills.security / 2)).max(1);
-            let dmg_to_player = rand::thread_rng().gen_range(min_dmg_to_player..max_dmg_to_player);
-            // actually apply damage
-            self.player.hp.change_by(-dmg_to_player);
-            contact.hp.change_by(-(dmg_to_hostile + buff_dmg));
-            print_lines.push(format!(
-                "You deal {}{} damage to {}.",
-                dmg_to_hostile, buff_text, contact.name
-            ));
-            print_lines.push(format!(
-                "You take {} damage from {}.",
-                dmg_to_player, contact.name
-            ));
-            if contact.hp.value <= 0 {
-                dead_hostiles.push(index);
-                self.player.stats.kills += 1;
+        if let Activity::Combat(contacts) = &mut self.activity {
+            for (index, contact) in contacts.iter_mut().enumerate() {
+                // dmg to hostile
+                let min_dmg_to_hostile =
+                    ((2 * self.player.skills.hacking) - contact.skills.security).max(0);
+                let max_dmg_to_hostile =
+                    ((4 * self.player.skills.hacking) - (contact.skills.security / 2)).max(1);
+                let dmg_to_hostile =
+                    rand::thread_rng().gen_range(min_dmg_to_hostile..max_dmg_to_hostile);
+                // buff dmg
+                let buff_dmg = self.player.buffs.get_buff_dmg(dmg_to_hostile);
+                let buff_text = if buff_dmg > 0 {
+                    format!(" + {}", buff_dmg)
+                } else {
+                    String::new()
+                };
+                // dmg to player
+                let min_dmg_to_player =
+                    (2 + contact.skills.hacking - self.player.skills.security).max(0);
+                let max_dmg_to_player =
+                    (4 + contact.skills.hacking - (self.player.skills.security / 2)).max(1);
+                let dmg_to_player =
+                    rand::thread_rng().gen_range(min_dmg_to_player..max_dmg_to_player);
+                // actually apply damage
+                self.player.hp.change_by(-dmg_to_player);
+                contact.hp.change_by(-(dmg_to_hostile + buff_dmg));
+                print_lines.push(format!(
+                    "You deal {}{} damage to {}.",
+                    dmg_to_hostile, buff_text, contact.name
+                ));
+                print_lines.push(format!(
+                    "You take {} damage from {}.",
+                    dmg_to_player, contact.name
+                ));
+                if contact.hp.value <= 0 {
+                    dead_hostiles.push(index);
+                    self.player.stats.kills += 1;
+                }
             }
-        }
-        for dead_index in dead_hostiles.iter().rev() {
-            // remove dead contacts
-            self.contacts.remove(*dead_index);
-        }
-        if self.contacts.len() == 0 {
-            self.state = GameState::FreeRoam;
-        }
-        for line in &print_lines {
-            self.terminal_print(line);
+            for dead_index in dead_hostiles.iter().rev() {
+                // remove dead contacts
+                contacts.remove(*dead_index);
+            }
+            if contacts.len() == 0 {
+                self.activity = Activity::FreeRoam;
+            }
+            for line in &print_lines {
+                self.terminal_print(line);
+            }
+        } else {
+            panic!("combat_attack() called not in combat")
         }
     }
 
@@ -171,7 +179,7 @@ impl NetrunnerGame {
         // gracefully transition the player into the shopping state
 
         // set game state
-        self.state = GameState::Interacting(InteractionType::BasicShop);
+        self.activity = Activity::Interacting(InteractionType::BasicShop);
         // text in terminal
         let net_name = match self.current_net {
             Networks::Internet => "the internet",
@@ -255,7 +263,6 @@ impl NetrunnerGame {
             // bad thing - encounter
             let new_contact = Contact::new(difficulty.ceil() as i32, &self.current_net);
             let contact_name = new_contact.name.clone();
-            self.contacts.push(new_contact);
             self.terminal_print(
                 format!(
                     "({:.1}) You run into a nasty piece of malware - {}",
@@ -264,7 +271,7 @@ impl NetrunnerGame {
                 )
                 .as_str(),
             );
-            self.state = GameState::Combat;
+            self.activity = Activity::Combat(vec![new_contact]);
         }
     }
 
@@ -315,23 +322,24 @@ impl NetrunnerGame {
                 }
             })
             .body(|ui| {
-                let enabled = match self.state {
-                    GameState::FreeRoam => true,
+                let enabled: bool = match self.activity {
+                    Activity::FreeRoam => true,
                     _ => false,
                 };
+                let can_add: bool = self.player.available_skill_points() > 0;
                 ui.add_enabled_ui(enabled, |ui| {
                     egui::Grid::new("some_unique_id").show(ui, |ui| {
                         // row: atk/def stats
                         ui.horizontal(|ui| {
                             ui.label("Hacking: ")
                                 .on_hover_text("Increases attack damage");
-                            ui_counter(ui, &mut self.player.skills.hacking);
+                            ui_counter(ui, &mut self.player.skills.hacking, can_add);
                         });
                         ui.horizontal(|ui| {
                             ui.separator();
                             ui.label("Security: ")
                                 .on_hover_text("Mitigates enemy hacks");
-                            ui_counter(ui, &mut self.player.skills.security);
+                            ui_counter(ui, &mut self.player.skills.security, can_add);
                         });
                         ui.end_row();
                     });
@@ -344,8 +352,8 @@ impl NetrunnerGame {
 
     fn list_available_networks(&mut self, ui: &mut egui::Ui) {
         // you can only change networks in free roam
-        let enabled = match self.state {
-            GameState::FreeRoam => true,
+        let enabled = match self.activity {
+            Activity::FreeRoam => true,
             _ => false,
         };
         ui.add_enabled_ui(enabled, |ui| {
@@ -377,17 +385,19 @@ impl NetrunnerGame {
     }
 
     fn combat_window(&mut self, ui: &mut egui::Ui) {
-        for contact in &self.contacts {
-            // ui.horizontal(|ui| {
-            ui.heading(RichText::new("Threat Detected").color(Color32::from_rgb(200, 100, 0)));
-            ui.label(format!("Contact: {}", contact.name));
-            ui.label(colored_label(
-                "HP",
-                contact.hp.value,
-                contact.hp.upper_limit,
-            ));
-            ui.label(format!("Disposition: {}", contact.disposition));
-            // });
+        if let Activity::Combat(contacts) = &self.activity {
+            for contact in contacts {
+                // ui.horizontal(|ui| {
+                ui.heading(RichText::new("Threat Detected").color(Color32::from_rgb(200, 100, 0)));
+                ui.label(format!("Contact: {}", contact.name));
+                ui.label(colored_label(
+                    "HP",
+                    contact.hp.value,
+                    contact.hp.upper_limit,
+                ));
+                ui.label(format!("Disposition: {}", contact.disposition));
+                // });
+            }
         }
         ui.horizontal(|ui| {
             let attack_cost = 4;
@@ -417,8 +427,7 @@ impl NetrunnerGame {
                 .button(RichText::new("Escape Combat").color(Color32::GRAY))
                 .clicked()
             {
-                self.state = GameState::FreeRoam;
-                self.contacts.clear();
+                self.activity = Activity::FreeRoam;
                 self.terminal_print("You escape from combat.")
             }
         });
@@ -504,23 +513,49 @@ impl NetrunnerGame {
                     .button(RichText::new("Enter Shop").color(Color32::GRAY))
                     .clicked()
                 {
-                    // self.state = GameState::Interacting(InteractionType::BasicShop);
+                    // self.state = ActivityInteracting(InteractionType::BasicShop);
                     self.go_shopping();
                 }
             };
         });
     }
+
+    fn interaction_window(&mut self, int_type: InteractionType, ui: &mut egui::Ui) {
+        match int_type {
+            InteractionType::BasicShop => {
+                ui.heading("Shopping");
+                self.shop_for_upgrades(ui);
+                if ui.button("Exit Shop").clicked() {
+                    self.activity = Activity::FreeRoam;
+                    self.player.enable_flag(PlayerFlag::DiscoveredShopBasic)
+                };
+            }
+        }
+    }
+
+    fn convo_window(&mut self, ui: &mut egui::Ui) {
+        // TODO - its own scrolling terminal maybe?
+        if let Activity::Conversing(ref mut convo) = self.activity {
+            ui.heading("Conversation");
+            ui.label(convo.show_lines_up_to());
+            if ui.button("continue convo").clicked() {
+                convo.next_line()
+            }
+        }
+    }
 }
 
-fn ui_counter(ui: &mut egui::Ui, counter: &mut i32) {
+fn ui_counter(ui: &mut egui::Ui, counter: &mut i32, can_add: bool) {
     // Put the buttons and label on the same row:
     ui.horizontal(|ui| {
         if ui.button("-").clicked() {
             *counter -= 1;
         }
         ui.label(counter.to_string());
-        if ui.button("+").clicked() {
-            *counter += 1;
+        if can_add {
+            if ui.button("+").clicked() {
+                *counter += 1;
+            }
         }
     });
 }
@@ -566,8 +601,8 @@ impl eframe::App for NetrunnerGame {
             .total_intel += delta_time.as_secs_f32() * 1.0;
 
         // render GUI
-        let browse_flavor_txt = match self.state {
-            GameState::Combat => "Engaged in combat",
+        let browse_flavor_txt = match self.activity {
+            Activity::Combat(_) => "Engaged in combat",
             _ => "Cruising the net",
         };
         egui::TopBottomPanel::top("my_panel").show(ctx, |ui| {
@@ -597,28 +632,18 @@ impl eframe::App for NetrunnerGame {
             };
             self.net_intel_bar(ui);
             ui.separator();
-            match self.state {
-                GameState::FreeRoam => self.list_available_tasks(ui),
-                GameState::Combat => self.combat_window(ui),
-                GameState::Interacting(int_type) => match int_type {
-                    InteractionType::BasicShop => {
-                        ui.heading("welcome to the script kiddie shop");
-                        self.shop_for_upgrades(ui);
-                        if ui.button("Exit Shop").clicked() {
-                            self.state = GameState::FreeRoam;
-                            self.player.enable_flag(PlayerFlag::DiscoveredShopBasic)
-                        };
-                    }
-
-                    InteractionType::AdvancedShop => {
-                        ui.heading("welcome to the elite hacker shop");
-                        self.shop_for_upgrades(ui);
-                        if ui.button("Exit Shop").clicked() {
-                            self.state = GameState::FreeRoam;
-                            self.player.enable_flag(PlayerFlag::DiscoveredShopBasic)
-                        };
-                    }
-                },
+            match self.activity {
+                Activity::FreeRoam => self.list_available_tasks(ui),
+                Activity::Combat(..) => self.combat_window(ui),
+                Activity::Interacting(int_type) => {
+                    self.interaction_window(int_type, ui);
+                }
+                Activity::Conversing(_) => {
+                    self.convo_window(ui);
+                }
+            }
+            if ui.button("DEBUG: convo").clicked() {
+                self.activity = Activity::Conversing(Conversation::new())
             }
             ui.separator();
             display_terminal(ui, &self.terminal_lines);
