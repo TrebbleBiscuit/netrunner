@@ -13,7 +13,7 @@ mod player;
 mod utils;
 
 use pieces::{Contact, Networks};
-use player::{Player, PlayerFlag, PlayerUpgradeType};
+use player::{NetStats, Player, PlayerFlag, PlayerUpgradeType};
 use utils::roll_encounter;
 
 // update at this framerate when there is no user input
@@ -303,7 +303,7 @@ impl NetrunnerGame {
 
     fn collapsible_stats_table(&mut self, ui: &mut egui::Ui) {
         let pts = self.player.available_skill_points();
-        let id = ui.make_persistent_id("my_collapsing_header");
+        let id = ui.make_persistent_id("collapsible_stats_table");
         egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, false)
             .show_header(ui, |ui| {
                 ui.label("Player Stats");
@@ -359,29 +359,25 @@ impl NetrunnerGame {
         ui.add_enabled_ui(enabled, |ui| {
             ui.horizontal(|ui| {
                 ui.label("Network: ");
-                if ui
-                    .add(egui::RadioButton::new(
-                        self.current_net == Networks::Internet,
-                        "Internet",
-                    ))
-                    .clicked()
-                {
-                    self.current_net = Networks::Internet
-                }
-                if ui
-                    .add(egui::RadioButton::new(
-                        self.current_net == Networks::SIPRnet,
-                        "SIPRnet",
-                    ))
-                    .clicked()
-                {
-                    self.current_net = Networks::SIPRnet
-                    // TODO: first time login
-                }
+
+                egui::ComboBox::from_label("Select one!")
+                    .selected_text(format!("{:?}", self.current_net))
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut self.current_net, Networks::Internet, "Internet");
+                        ui.selectable_value(&mut self.current_net, Networks::SIPRnet, "SIPRNet");
+                    });
+                ui.label(format!(
+                    " - {:.0} intel",
+                    self.player_current_net_stats().total_intel
+                ));
                 // ui.radio_value(&mut self.current_net, Networks::Internet, "Internet");
                 // ui.radio_value(&mut self.current_net, Networks::SIPRnet, "SIPRnet");
             });
         });
+        match self.current_net {
+            Networks::Internet => ui.label("You are browsing the public internet."),
+            Networks::SIPRnet => ui.label("You are logged in to the US DoD's classified network."),
+        };
     }
 
     fn combat_window(&mut self, ui: &mut egui::Ui) {
@@ -476,13 +472,12 @@ impl NetrunnerGame {
         }
     }
 
+    fn player_current_net_stats(&self) -> &NetStats {
+        self.player.net_stats.get(&self.current_net).unwrap()
+    }
+
     fn net_intel_bar(&mut self, ui: &mut egui::Ui) {
-        let total_intel = self
-            .player
-            .net_stats
-            .get(&self.current_net)
-            .unwrap()
-            .total_intel;
+        let total_intel = self.player_current_net_stats().total_intel;
         let per_level_cost = 200.0 * self.current_net.difficulty();
         let intel_level = (total_intel / per_level_cost).floor();
         let progress = (total_intel % per_level_cost) / per_level_cost;
@@ -537,9 +532,24 @@ impl NetrunnerGame {
         // TODO - its own scrolling terminal maybe?
         if let Activity::Conversing(ref mut convo) = self.activity {
             ui.heading("Conversation");
-            ui.label(convo.show_lines_up_to());
-            if ui.button("continue convo").clicked() {
-                convo.next_line()
+            // conversation history
+            let id = ui.make_persistent_id("convo_history");
+            egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, false)
+                .show_header(ui, |ui| {
+                    ui.label("History"); // you can put checkboxes or whatever here
+                })
+                .body(|ui| ui.label(convo.show_lines_before()));
+            // current line of the conversation
+            ui.label(convo.show_line());
+            // continue/leave button
+            if convo.done() {
+                if ui.button("end convo").clicked() {
+                    self.activity = Activity::FreeRoam
+                }
+            } else {
+                if ui.button("continue convo").clicked() {
+                    convo.next_line();
+                }
             }
         }
     }
@@ -621,16 +631,10 @@ impl eframe::App for NetrunnerGame {
             });
             self.player_stats_table(ui);
             self.collapsible_stats_table(ui);
-            ui.separator();
+            // ui.separator();
             // list available networks
             self.list_available_networks(ui);
-            match self.current_net {
-                Networks::Internet => ui.label("You are browsing the public internet."),
-                Networks::SIPRnet => {
-                    ui.label("You are logged in to the US DoD's classified network.")
-                }
-            };
-            self.net_intel_bar(ui);
+            // self.net_intel_bar(ui);
             ui.separator();
             match self.activity {
                 Activity::FreeRoam => self.list_available_tasks(ui),

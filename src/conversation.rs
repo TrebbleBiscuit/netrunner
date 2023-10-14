@@ -25,14 +25,17 @@ impl Conversation {
         }
     }
 
-    pub fn show_lines_up_to(&self) -> String {
+    pub fn show_lines_before(&self) -> String {
+        // display every line before the current one
         let mut total_string = "".to_owned();
         for index in 0..self.line_index {
             match self.lines.get(index as usize) {
                 Some(convo_line) => match convo_line {
                     ConversationLine::Text(txt) => {
+                        if index > 0 {
+                            total_string.push_str("\n");
+                        }
                         total_string.push_str(&txt);
-                        total_string.push_str("\n");
                     }
                 },
                 None => {}
@@ -52,5 +55,9 @@ impl Conversation {
 
     pub fn next_line(&mut self) {
         self.line_index += 1;
+    }
+
+    pub fn done(&self) -> bool {
+        self.line_index + 1 >= self.lines.len() as i32
     }
 }
