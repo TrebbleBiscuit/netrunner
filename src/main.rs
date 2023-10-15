@@ -10,6 +10,7 @@ mod buffs;
 mod conversation;
 mod pieces;
 mod player;
+mod quests;
 mod utils;
 
 use pieces::{Contact, Networks};
