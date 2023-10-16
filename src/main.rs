@@ -38,17 +38,16 @@ fn main() -> Result<(), eframe::Error> {
 #[derive(PartialEq)]
 enum Tasks {
     Search,
-    Datamine, // collect data from net
-              // Social,   // level up social skill?
+    Datamine,
+    Recover,
 }
 
 impl Tasks {
     fn description(&self) -> RichText {
         match *self {
-            Tasks::Search => RichText::new("High risk, ++ Credits, ???").color(Color32::DARK_GRAY),
-            Tasks::Datamine => {
-                RichText::new("Low risk, + Credits, + Ram").color(Color32::DARK_GRAY)
-            }
+            Tasks::Search => RichText::new("+ Credits, ???").color(Color32::DARK_GRAY),
+            Tasks::Datamine => RichText::new("High risk, ++ Credits").color(Color32::DARK_GRAY),
+            Tasks::Recover => RichText::new("Low risk, ++ RAM").color(Color32::DARK_GRAY),
         }
     }
 }
@@ -192,7 +191,8 @@ impl NetrunnerGame {
             }
             Tasks::Datamine => {
                 self.do_task_datamine(difficulty);
-            } // Tasks::Social => self.terminal_print("Nah, you don't want to do that."),
+            }
+            Tasks::Recover => self.do_task_recovery(), // Tasks::Social => self.terminal_print("Nah, you don't want to do that."),
         }
     }
 
@@ -211,6 +211,13 @@ impl NetrunnerGame {
         );
     }
 
+    fn do_task_recovery(&mut self) {
+        self.do_turn();
+        let reward = rand::thread_rng().gen_range(6..18);
+        self.player.ram.change_by(reward);
+        self.terminal_print(format!("You recover {} RAM", reward).as_str());
+    }
+
     fn do_task_datamine(&mut self, difficulty: f32) {
         self.do_turn();
         let mut rng = thread_rng();
@@ -219,7 +226,7 @@ impl NetrunnerGame {
         if roll_encounter(1.0 - success_chance) {
             // success - earn credits
             self.player.stats.datamine_success += 1;
-            let reward_amount: i32 = (roll_success * difficulty * 4.5).ceil() as i32;
+            let reward_amount: i32 = (roll_success * difficulty * 14.5).ceil() as i32;
             self.player.credits += reward_amount;
             self.terminal_print(
                 format!(
@@ -229,17 +236,18 @@ impl NetrunnerGame {
                 .as_str(),
             );
         } else {
-            // "fail" - regen ram
-            let reward_amount: i32 = (roll_success * 14.5 + difficulty).ceil() as i32;
-            self.player.ram.change_by(reward_amount);
+            // "fail" - combat
+            let new_contact = Contact::new(difficulty.ceil() as i32, &self.current_net);
+            let contact_name = new_contact.name.clone();
             self.terminal_print(
                 format!(
-                    "({:.1}) You don't find any new data, but regenerate {} RAM",
+                    "({:.1}) You run into a nasty piece of malware - {}",
                     { 1.0 - success_chance },
-                    reward_amount
+                    contact_name
                 )
                 .as_str(),
             );
+            self.activity = Activity::Combat(vec![new_contact]);
         }
     }
 
@@ -269,9 +277,9 @@ impl NetrunnerGame {
 
         let success_chance = 0.8;
         if roll_encounter(1.0 - success_chance) {
-            // minor good thing - search success
+            // good thing - search success
             self.player.stats.search_success += 1;
-            let reward_amount: i32 = (roll_success * difficulty * 14.5).ceil() as i32;
+            let reward_amount: i32 = (roll_success * difficulty * 6.5).ceil() as i32;
             self.player.credits += reward_amount;
             self.terminal_print(
                 format!(
@@ -281,18 +289,17 @@ impl NetrunnerGame {
                 .as_str(),
             );
         } else {
-            // bad thing - encounter
-            let new_contact = Contact::new(difficulty.ceil() as i32, &self.current_net);
-            let contact_name = new_contact.name.clone();
+            // regen a bit of ram
+            let reward_amount: i32 = (roll_success * 7.5 + difficulty).ceil() as i32;
+            self.player.ram.change_by(reward_amount);
             self.terminal_print(
                 format!(
-                    "({:.1}) You run into a nasty piece of malware - {}",
+                    "({:.1}) You don't find anything new, but regenerate {} RAM",
                     { 1.0 - success_chance },
-                    contact_name
+                    reward_amount
                 )
                 .as_str(),
             );
-            self.activity = Activity::Combat(vec![new_contact]);
         }
     }
 
@@ -563,8 +570,9 @@ impl NetrunnerGame {
         ui.heading("Task selection");
         ui.horizontal(|ui| {
             ui.label("Task: ");
-            ui.selectable_value(&mut self.current_task, Tasks::Datamine, "Datamine");
+            ui.selectable_value(&mut self.current_task, Tasks::Recover, "Recover");
             ui.selectable_value(&mut self.current_task, Tasks::Search, "Search around");
+            ui.selectable_value(&mut self.current_task, Tasks::Datamine, "Datamine");
         });
         ui.label(self.current_task.description());
         ui.horizontal(|ui| {
