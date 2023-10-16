@@ -109,6 +109,9 @@ impl Player {
         }
     }
 
+    pub fn add_xp(&mut self, to_add: i32) {
+        self.xp += to_add;
+    }
 }
 
 impl Default for Player {

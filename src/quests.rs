@@ -25,7 +25,7 @@ impl Quest {
     pub fn combat_victory() -> Self {
         Self {
             quest_id: QuestID::CombatVictory,
-            finish_threshold: 1,
+            finish_threshold: 4,
             value: 0,
             visible: true,
             active: true,

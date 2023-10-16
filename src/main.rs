@@ -141,6 +141,12 @@ impl NetrunnerGame {
                 if contact.hp.value <= 0 {
                     dead_hostiles.push(index);
                     self.player.stats.kills += 1;
+                    self.player.add_xp(contact.reward());
+                    self.player
+                        .net_stats
+                        .get_mut(&self.current_net)
+                        .unwrap()
+                        .total_intel += 12.0;
                 }
             }
             for dead_index in dead_hostiles.iter().rev() {
@@ -173,7 +179,10 @@ impl NetrunnerGame {
 
     fn finish_quest(&mut self, quest_id: &QuestID) {
         match quest_id {
-            QuestID::CombatVictory => self.terminal_print("You finished a quest!"),
+            QuestID::CombatVictory => {
+                self.terminal_print("You finished a quest!");
+                self.player.add_xp(50);
+            }
         }
     }
 
@@ -228,6 +237,11 @@ impl NetrunnerGame {
             self.player.stats.datamine_success += 1;
             let reward_amount: i32 = (roll_success * difficulty * 14.5).ceil() as i32;
             self.player.credits += reward_amount;
+            self.player
+                .net_stats
+                .get_mut(&self.current_net)
+                .unwrap()
+                .total_intel += 3.0;
             self.terminal_print(
                 format!(
                     "({:.1}) You found some interesting data worth {} credits",
@@ -334,7 +348,7 @@ impl NetrunnerGame {
         let id = ui.make_persistent_id("collapsible_stats_table");
         egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, false)
             .show_header(ui, |ui| {
-                ui.label("Player Stats");
+                ui.label("Your Stats");
                 if pts > 0 {
                     // ui.label(format!("- {} points available", pts));
                     ui.label(
@@ -435,14 +449,14 @@ impl NetrunnerGame {
             ui.horizontal(|ui| {
                 ui.label("Network: ");
 
-                egui::ComboBox::from_label("Select one!")
+                egui::ComboBox::from_label("")
                     .selected_text(format!("{:?}", self.current_net))
                     .show_ui(ui, |ui| {
                         ui.selectable_value(&mut self.current_net, Networks::Internet, "Internet");
                         ui.selectable_value(&mut self.current_net, Networks::SIPRnet, "SIPRNet");
                     });
                 ui.label(format!(
-                    " - {:.0} intel",
+                    "{:.0} net intel",
                     self.player_current_net_stats().total_intel
                 ));
                 // ui.radio_value(&mut self.current_net, Networks::Internet, "Internet");
@@ -499,7 +513,12 @@ impl NetrunnerGame {
                 .clicked()
             {
                 self.activity = Activity::FreeRoam;
-                self.terminal_print("You escape from combat.")
+                self.terminal_print("You escape from combat.");
+                self.player
+                    .net_stats
+                    .get_mut(&self.current_net)
+                    .unwrap()
+                    .total_intel -= 7.0;
             }
         });
     }
@@ -700,11 +719,11 @@ impl eframe::App for NetrunnerGame {
         });
 
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.horizontal(|ui| {
-                let name_label = ui.label("Your name: ");
-                ui.text_edit_singleline(&mut self.player.name)
-                    .labelled_by(name_label.id);
-            });
+            // ui.horizontal(|ui| {
+            //     let name_label = ui.label("Your name: ");
+            //     ui.text_edit_singleline(&mut self.player.name)
+            //         .labelled_by(name_label.id);
+            // });
             self.player_stats_table(ui);
             self.collapsible_stats_table(ui);
             // ui.separator();

@@ -69,6 +69,10 @@ impl Contact {
             disposition: Disposition::Hostile,
         }
     }
+
+    pub fn reward(&self) -> i32 {
+        self.skills.total_points() + (self.hp.upper_limit / 10)
+    }
 }
 
 impl Default for Contact {
