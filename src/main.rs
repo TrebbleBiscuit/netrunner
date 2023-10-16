@@ -3,6 +3,7 @@
 use conversation::Conversation;
 use eframe::egui;
 use egui::{Color32, RichText};
+use quests::QuestID;
 use rand::{thread_rng, Rng};
 use std::time::{Duration, Instant};
 
@@ -150,11 +151,30 @@ impl NetrunnerGame {
             if contacts.len() == 0 {
                 self.activity = Activity::FreeRoam;
             }
+            // now we're done with "contacts", can mutably borrow again
+            for _ in 0..dead_hostiles.len() {
+                self.trigger_quest(&QuestID::CombatVictory);
+            }
             for line in &print_lines {
                 self.terminal_print(line);
             }
         } else {
             panic!("combat_attack() called not in combat")
+        }
+    }
+
+    fn trigger_quest(&mut self, quest_id: &QuestID) {
+        if let Some(quest) = self.player.quests.get_mut(quest_id) {
+            quest.increment();
+            if quest.is_finished() {
+                self.finish_quest(quest_id);
+            }
+        }
+    }
+
+    fn finish_quest(&mut self, quest_id: &QuestID) {
+        match quest_id {
+            QuestID::CombatVictory => self.terminal_print("You finished a quest!"),
         }
     }
 
@@ -349,6 +369,53 @@ impl NetrunnerGame {
 
         // egui::CollapsingHeader::new(label.as_str()).show(ui, |ui| {
         // });
+    }
+
+    fn quest_panel(&mut self, ui: &mut egui::Ui) {
+        if self
+            .player
+            .quests
+            .iter()
+            .filter(|&(_, q)| q.trackable())
+            .into_iter()
+            .count()
+            == 0
+        {
+            return;
+        }
+
+        ui.horizontal(|ui| {
+            // show edit button in free roam
+            match self.activity {
+                Activity::FreeRoam => {
+                    if ui.button(RichText::new("✏").color(Color32::GRAY)).clicked() {
+                        self.player.toggle_flag(PlayerFlag::EditingTrackedQuests)
+                    }
+                }
+                _ => {}
+            }
+            ui.label("Tracked Quests:");
+        });
+        let mut tracked_quests_counter: i32 = 0;
+        let is_editing: bool = self.player.has_flag(&PlayerFlag::EditingTrackedQuests);
+        for (_, quest) in self.player.quests.iter_mut() {
+            if !is_editing && quest.tracked && quest.trackable() {
+                // show just quest name
+                ui.label(quest.name());
+                tracked_quests_counter += 1;
+            } else if is_editing && quest.trackable() {
+                // show editing buttons
+                ui.horizontal(|ui| {
+                    ui.checkbox(&mut quest.tracked, "Track");
+                    ui.label(quest.name());
+                });
+                tracked_quests_counter += 1;
+            };
+        }
+        if tracked_quests_counter == 0 {
+            ui.label("No quests tracked");
+        };
+        ui.separator();
     }
 
     fn list_available_networks(&mut self, ui: &mut egui::Ui) {
@@ -637,14 +704,21 @@ impl eframe::App for NetrunnerGame {
             self.list_available_networks(ui);
             // self.net_intel_bar(ui);
             ui.separator();
-            match self.activity {
-                Activity::FreeRoam => self.list_available_tasks(ui),
-                Activity::Combat(..) => self.combat_window(ui),
-                Activity::Interacting(int_type) => {
-                    self.interaction_window(int_type, ui);
-                }
-                Activity::Conversing(_) => {
-                    self.convo_window(ui);
+            // quests go here
+
+            self.quest_panel(ui);
+            if self.player.has_flag(&PlayerFlag::EditingTrackedQuests) {
+                ui.label("Click the '✏' to finish editing tracked quests");
+            } else {
+                match self.activity {
+                    Activity::FreeRoam => self.list_available_tasks(ui),
+                    Activity::Combat(..) => self.combat_window(ui),
+                    Activity::Interacting(int_type) => {
+                        self.interaction_window(int_type, ui);
+                    }
+                    Activity::Conversing(_) => {
+                        self.convo_window(ui);
+                    }
                 }
             }
             if ui.button("DEBUG: convo").clicked() {

@@ -3,6 +3,7 @@ use std::collections::HashMap;
 
 use crate::buffs::BuffContainer;
 use crate::pieces::{CappedValue, Networks, Skills, BASE_SKILL_POINTS};
+use crate::quests::{Quest, QuestID};
 
 pub struct PlayerStats {
     pub kills: u32,
@@ -62,6 +63,7 @@ impl PlayerUpgrade {
 #[derive(Debug, PartialEq, Eq)]
 pub enum PlayerFlag {
     DiscoveredShopBasic,
+    EditingTrackedQuests,
 }
 
 pub struct Player {
@@ -76,6 +78,7 @@ pub struct Player {
     pub upgrades: HashMap<PlayerUpgradeType, PlayerUpgrade>,
     pub flags: Vec<PlayerFlag>,
     pub buffs: BuffContainer,
+    pub quests: HashMap<QuestID, Quest>,
 }
 
 impl Player {
@@ -97,6 +100,15 @@ impl Player {
     pub fn has_flag(&self, flag: &PlayerFlag) -> bool {
         self.flags.contains(flag)
     }
+
+    pub fn toggle_flag(&mut self, flag: PlayerFlag) {
+        if self.flags.contains(&flag) {
+            self.disable_flag(&flag);
+        } else {
+            self.flags.push(flag);
+        }
+    }
+
 }
 
 impl Default for Player {
@@ -125,6 +137,8 @@ impl Default for Player {
         let mut net_stats = HashMap::new();
         net_stats.insert(Networks::Internet, NetStats::default());
         net_stats.insert(Networks::SIPRnet, NetStats::default());
+        let mut quests = HashMap::new();
+        quests.insert(QuestID::CombatVictory, Quest::combat_victory());
         Self {
             name: random_default_name(),
             stats: PlayerStats::default(),
@@ -137,6 +151,7 @@ impl Default for Player {
             upgrades: upgrades,
             flags: vec![],
             buffs: BuffContainer::new(),
+            quests: quests,
         }
     }
 }
