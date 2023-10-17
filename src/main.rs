@@ -172,16 +172,20 @@ impl NetrunnerGame {
         if let Some(quest) = self.player.quests.get_mut(quest_id) {
             quest.increment();
             if quest.is_finished() {
-                self.finish_quest(quest_id);
-            }
-        }
-    }
-
-    fn finish_quest(&mut self, quest_id: &QuestID) {
-        match quest_id {
-            QuestID::CombatVictory => {
-                self.terminal_print("You finished a quest!");
-                self.player.add_xp(50);
+                match quest.reward {
+                    quests::QuestReward::XP(amnt) => {
+                        self.player.add_xp(amnt);
+                        self.terminal_print(format!("You gained {} XP.", amnt).as_str());
+                    }
+                }
+                match quest_id {
+                    QuestID::CombatVictory => {
+                        self.terminal_print("Victorious in combat, you finish a quest!");
+                    }
+                    QuestID::DatamineSuccess => {
+                        self.terminal_print("Successful in datamining, you finish a quest!");
+                    }
+                }
             }
         }
     }
@@ -221,6 +225,10 @@ impl NetrunnerGame {
     }
 
     fn do_task_recovery(&mut self) {
+        if self.player.ram.upper_limit == self.player.ram.value {
+            self.terminal_print("You are already at maximum RAM");
+            return;
+        }
         self.do_turn();
         let reward = rand::thread_rng().gen_range(6..18);
         self.player.ram.change_by(reward);
@@ -249,6 +257,7 @@ impl NetrunnerGame {
                 )
                 .as_str(),
             );
+            self.trigger_quest(&QuestID::DatamineSuccess);
         } else {
             // "fail" - combat
             let new_contact = Contact::new(difficulty.ceil() as i32, &self.current_net);
@@ -359,7 +368,8 @@ impl NetrunnerGame {
                                 ""
                             }
                         }))
-                        .color(egui::Color32::LIGHT_GRAY),
+                        // .color(egui::Color32::LIGHT_RED)
+                        .strong(),
                     );
                 }
             })
@@ -409,9 +419,7 @@ impl NetrunnerGame {
             // show edit button in free roam
             match self.activity {
                 Activity::FreeRoam => {
-                    if ui.button(RichText::new("✏").color(Color32::GRAY)).clicked() {
-                        self.player.toggle_flag(PlayerFlag::EditingTrackedQuests)
-                    }
+                    self.edit_tracked_quests_button(ui);
                 }
                 _ => {}
             }
@@ -422,21 +430,43 @@ impl NetrunnerGame {
         for (_, quest) in self.player.quests.iter_mut() {
             if !is_editing && quest.tracked && quest.trackable() {
                 // show just quest name
-                ui.label(quest.name());
+                ui.label(format!("        {}", quest.name()));
                 tracked_quests_counter += 1;
             } else if is_editing && quest.trackable() {
                 // show editing buttons
                 ui.horizontal(|ui| {
-                    ui.checkbox(&mut quest.tracked, "Track");
-                    ui.label(quest.name());
+                    ui.checkbox(&mut quest.tracked, "");
+                    ui.label(format!("{}", quest.name()));
                 });
                 tracked_quests_counter += 1;
             };
         }
         if tracked_quests_counter == 0 {
-            ui.label("No quests tracked");
+            ui.label(RichText::new("        No quests tracked").weak());
         };
         ui.separator();
+    }
+
+    fn edit_tracked_quests_button(&mut self, ui: &mut egui::Ui) {
+        let text_color: Color32;
+        let bg_color: Color32;
+        if self.player.has_flag(&PlayerFlag::EditingTrackedQuests) {
+            text_color = Color32::LIGHT_RED;
+            bg_color = Color32::DARK_GRAY;
+        } else {
+            text_color = Color32::GRAY;
+            bg_color = Color32::from_rgb(50, 50, 50);
+        };
+        if ui
+            .add(
+                egui::Button::new(RichText::new("✏").color(text_color))
+                    .small()
+                    .fill(bg_color),
+            )
+            .clicked()
+        {
+            self.player.toggle_flag(PlayerFlag::EditingTrackedQuests)
+        };
     }
 
     fn list_available_networks(&mut self, ui: &mut egui::Ui) {
@@ -448,19 +478,25 @@ impl NetrunnerGame {
         ui.add_enabled_ui(enabled, |ui| {
             ui.horizontal(|ui| {
                 ui.label("Network: ");
-
+                // ComboBox to select networks
                 egui::ComboBox::from_label("")
                     .selected_text(format!("{:?}", self.current_net))
                     .show_ui(ui, |ui| {
+                        // internet always available
                         ui.selectable_value(&mut self.current_net, Networks::Internet, "Internet");
-                        ui.selectable_value(&mut self.current_net, Networks::SIPRnet, "SIPRNet");
+                        // SIPRnet only after you unlock it
+                        if self.player.has_flag(&PlayerFlag::UnlockedNetworkSIPR) {
+                            ui.selectable_value(
+                                &mut self.current_net,
+                                Networks::SIPRnet,
+                                "SIPRNet",
+                            );
+                        }
                     });
                 ui.label(format!(
                     "{:.0} net intel",
                     self.player_current_net_stats().total_intel
                 ));
-                // ui.radio_value(&mut self.current_net, Networks::Internet, "Internet");
-                // ui.radio_value(&mut self.current_net, Networks::SIPRnet, "SIPRnet");
             });
         });
         match self.current_net {
@@ -711,11 +747,11 @@ impl eframe::App for NetrunnerGame {
             _ => "Cruising the net",
         };
         egui::TopBottomPanel::top("my_panel").show(ctx, |ui| {
-            ui.heading(format!(
-                "{} - latency: {} ms",
-                browse_flavor_txt,
-                delta_time.as_millis()
-            ));
+            ui.horizontal(|ui| {
+                ui.heading(format!("{}", browse_flavor_txt,));
+                ui.add_space(11.0);
+                ui.label(RichText::new(format!("latency: {} ms", delta_time.as_millis())).weak())
+            })
         });
 
         egui::CentralPanel::default().show(ctx, |ui| {
@@ -735,6 +771,7 @@ impl eframe::App for NetrunnerGame {
 
             self.quest_panel(ui);
             if self.player.has_flag(&PlayerFlag::EditingTrackedQuests) {
+                ui.label("Click checkboxes next to quests to track them");
                 ui.label("Click the '✏' to finish editing tracked quests");
             } else {
                 match self.activity {
@@ -748,9 +785,9 @@ impl eframe::App for NetrunnerGame {
                     }
                 }
             }
-            if ui.button("DEBUG: convo").clicked() {
-                self.activity = Activity::Conversing(Conversation::new())
-            }
+            // if ui.button("DEBUG: convo").clicked() {
+            //     self.activity = Activity::Conversing(Conversation::test())
+            // }
             ui.separator();
             display_terminal(ui, &self.terminal_lines);
         });

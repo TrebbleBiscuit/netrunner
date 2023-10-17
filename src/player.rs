@@ -3,7 +3,7 @@ use std::collections::HashMap;
 
 use crate::buffs::BuffContainer;
 use crate::pieces::{CappedValue, Networks, Skills, BASE_SKILL_POINTS};
-use crate::quests::{Quest, QuestID};
+use crate::quests::{default_quests, Quest, QuestID};
 
 pub struct PlayerStats {
     pub kills: u32,
@@ -64,6 +64,7 @@ impl PlayerUpgrade {
 pub enum PlayerFlag {
     DiscoveredShopBasic,
     EditingTrackedQuests,
+    UnlockedNetworkSIPR,
 }
 
 pub struct Player {
@@ -140,8 +141,6 @@ impl Default for Player {
         let mut net_stats = HashMap::new();
         net_stats.insert(Networks::Internet, NetStats::default());
         net_stats.insert(Networks::SIPRnet, NetStats::default());
-        let mut quests = HashMap::new();
-        quests.insert(QuestID::CombatVictory, Quest::combat_victory());
         Self {
             name: random_default_name(),
             stats: PlayerStats::default(),
@@ -154,7 +153,7 @@ impl Default for Player {
             upgrades: upgrades,
             flags: vec![],
             buffs: BuffContainer::new(),
-            quests: quests,
+            quests: default_quests(),
         }
     }
 }

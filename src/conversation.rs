@@ -14,7 +14,7 @@ pub struct Conversation {
 }
 
 impl Conversation {
-    pub fn new() -> Self {
+    pub fn test() -> Self {
         let mut lines = vec![
             ConversationLine::from_str("Hello"),
             ConversationLine::from_str("World"),
