@@ -105,6 +105,7 @@ impl NetrunnerGame {
         let mut dead_hostiles = vec![];
         let mut print_lines = vec![];
         if let Activity::Combat(contacts) = &mut self.activity {
+            // we're in combat! iterate over each foe
             for (index, contact) in contacts.iter_mut().enumerate() {
                 // dmg to hostile
                 let min_dmg_to_hostile =
@@ -120,25 +121,17 @@ impl NetrunnerGame {
                 } else {
                     String::new()
                 };
-                // dmg to player
-                let min_dmg_to_player =
-                    (2 + contact.skills.hacking - self.player.skills.security).max(0);
-                let max_dmg_to_player =
-                    (4 + contact.skills.hacking - (self.player.skills.security / 2)).max(1);
-                let dmg_to_player =
-                    rand::thread_rng().gen_range(min_dmg_to_player..max_dmg_to_player);
+
                 // actually apply damage
-                self.player.hp.change_by(-dmg_to_player);
+                // to hostile
                 contact.hp.change_by(-(dmg_to_hostile + buff_dmg));
                 print_lines.push(format!(
                     "You deal {}{} damage to {}.",
                     dmg_to_hostile, buff_text, contact.name
                 ));
-                print_lines.push(format!(
-                    "You take {} damage from {}.",
-                    dmg_to_player, contact.name
-                ));
+
                 if contact.hp.value <= 0 {
+                    // killed an enemy!
                     dead_hostiles.push(index);
                     self.player.stats.kills += 1;
                     self.player.add_xp(contact.reward());
@@ -147,6 +140,20 @@ impl NetrunnerGame {
                         .get_mut(&self.current_net)
                         .unwrap()
                         .total_intel += 12.0;
+                } else {
+                    // we didn't kill the enemy, it will do damage
+                    let min_dmg_to_player =
+                        (2 + contact.skills.hacking - self.player.skills.security).max(0);
+                    let max_dmg_to_player =
+                        (4 + contact.skills.hacking - (self.player.skills.security / 2)).max(1);
+                    let dmg_to_player =
+                        rand::thread_rng().gen_range(min_dmg_to_player..max_dmg_to_player);
+                    // apply damage to player
+                    self.player.hp.change_by(-dmg_to_player);
+                    print_lines.push(format!(
+                        "You take {} damage from {}.",
+                        dmg_to_player, contact.name
+                    ));
                 }
             }
             for dead_index in dead_hostiles.iter().rev() {

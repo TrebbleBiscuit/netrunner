@@ -21,12 +21,17 @@ pub enum QuestReward {
 
 pub struct Quest {
     pub quest_id: QuestID,
+    /// value must be at or above this value to finish the quest
     finish_threshold: u32,
     pub reward: QuestReward,
     // state
+    /// quest will complete once this value is above finish_threshold
     value: u32,
-    visible: bool, // can be tracked
-    active: bool,  // progress can be made
+    /// quest can be tracked, may or may not be
+    visible: bool,
+    /// progress can be made
+    active: bool,
+    /// quest is actively being tracked
     pub tracked: bool,
 }
 
