@@ -107,7 +107,7 @@ impl NetrunnerGame {
         if let Activity::Combat(contacts) = &mut self.activity {
             // we're in combat! iterate over each foe
             for (index, contact) in contacts.iter_mut().enumerate() {
-                // dmg to hostile
+                // calculate dmg to hostile
                 let min_dmg_to_hostile =
                     ((2 * self.player.skills.hacking) - contact.skills.security).max(0);
                 let max_dmg_to_hostile =
@@ -122,16 +122,19 @@ impl NetrunnerGame {
                     String::new()
                 };
 
-                // actually apply damage
-                // to hostile
-                contact.hp.change_by(-(dmg_to_hostile + buff_dmg));
+                // when the contact's HP reaches zero death/xp messages are immediately displayed
+                // but the messages in print_lines aren't until the end of the loop
+                // this is a problem because I want "you deal X damage" to show up before "the bad guy dies"
+                // TODO: figure out how to resolve this
                 print_lines.push(format!(
                     "You deal {}{} damage to {}.",
                     dmg_to_hostile, buff_text, contact.name
                 ));
+                contact.hp.change_by(-(dmg_to_hostile + buff_dmg));
 
                 if contact.hp.value <= 0 {
                     // killed an enemy!
+                    print_lines.push("You are victorious!".to_owned());
                     dead_hostiles.push(index);
                     self.player.stats.kills += 1;
                     self.player.add_xp(contact.reward());
@@ -177,8 +180,12 @@ impl NetrunnerGame {
 
     fn trigger_quest(&mut self, quest_id: &QuestID) {
         if let Some(quest) = self.player.quests.get_mut(quest_id) {
+            if quest.is_finished() {
+                return
+            }
             quest.increment();
             if quest.is_finished() {
+                // these things only happen if this increment just caused us to complete the quest
                 match quest.reward {
                     quests::QuestReward::XP(amnt) => {
                         self.player.add_xp(amnt);
