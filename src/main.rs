@@ -239,14 +239,28 @@ impl NetrunnerGame {
     }
 
     fn do_task_recovery(&mut self) {
-        if self.player.ram.upper_limit == self.player.ram.value {
-            self.terminal_print("You are already at maximum RAM");
+        let is_max_ram = self.player.ram.upper_limit == self.player.ram.value;
+        let is_max_hp = self.player.hp.upper_limit == self.player.hp.value;
+        if (is_max_hp) && (is_max_ram) {
+            self.terminal_print("You are already at maximum HP and RAM");
             return;
         }
+
         self.do_turn();
-        let reward = rand::thread_rng().gen_range(6..18);
-        self.player.ram.change_by(reward);
-        self.terminal_print(format!("You recover {} RAM", reward).as_str());
+
+        // Recover RAM
+        if !is_max_ram {
+            let reward = rand::thread_rng().gen_range(7..22);
+            self.player.ram.change_by(reward);
+            self.terminal_print(format!("You recover {} RAM", reward).as_str());
+        }
+
+        // Recover HP
+        if !is_max_hp {
+            let reward = rand::thread_rng().gen_range(5..16);
+            self.player.hp.change_by(reward);
+            self.terminal_print(format!("You recover {} HP", reward).as_str());
+        }
     }
 
     fn do_task_datamine(&mut self, difficulty: f32) {
@@ -575,7 +589,9 @@ impl NetrunnerGame {
 
     fn shop_for_upgrades(&mut self, ui: &mut egui::Ui) {
         if self.player.has_flag(&PlayerFlag::DiscoveredShopBasic) {
-            ui.label("New here? Don't recognize you. c Let's do biz.");
+            ui.label("\"Welcome back. Here for an upgrade?\"");
+        } else {
+            ui.label("\"I don't recognize you, must be new here. Let's do biz.\"");
         };
         let mut available_upgrades = vec![];
         for (_, upgrade) in self.player.upgrades.iter() {
